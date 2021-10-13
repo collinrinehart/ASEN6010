@@ -449,8 +449,8 @@ def plot_conservation(data, title):
 
 
 if __name__ == '__main__':
-    mrp0 = np.matrix([[0.3], [-0.4], [0.5]])
-    w0_BN = (math.pi / 180) * np.matrix([[1.0], [1.75], [-2.20]])  # deg/s, expressed in body frame
+    mrp0 = np.matrix([[0], [0], [0]])
+    w0_BN = (math.pi / 180) * np.matrix([[0.5], [0.5], [0]])  # deg/s, expressed in body frame
     initial_state = np.concatenate((mrp0, w0_BN), axis=0)  # initial state vector (MRPs and rad/s)
 
     #Task 1
