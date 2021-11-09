@@ -25,13 +25,13 @@ def generate_states(time):
     theta_LMO_t = math.radians(60) + theta_dot_LMO * time
     theta_GMO_t = math.radians(250) + theta_dot_GMO * time
 
-    r_orbitframe_LMO = np.matrix([[r_LMO], [0], [0]])
-    r_orbitframe_GMO = np.matrix([[r_GMO], [0], [0]])
-    v_orbitframe_LMO = np.matrix([[0], [math.sqrt(mu / r_LMO)], [0]])
-    v_orbitframe_GMO = np.matrix([[0], [math.sqrt(mu / r_GMO)], [0]])
+    r_orbitframe_LMO = np.array([[r_LMO], [0], [0]])
+    r_orbitframe_GMO = np.array([[r_GMO], [0], [0]])
+    v_orbitframe_LMO = np.array([[0], [math.sqrt(mu / r_LMO)], [0]])
+    v_orbitframe_GMO = np.array([[0], [math.sqrt(mu / r_GMO)], [0]])
 
     # Calculates the [NH] DCM for both spacecraft
-    NH_LMO = np.matrix([[math.cos(RAAN_LMO)*math.cos(theta_LMO_t)-math.sin(RAAN_LMO)*math.cos(i_LMO)*math.sin(theta_LMO_t),
+    NH_LMO = np.array([[math.cos(RAAN_LMO)*math.cos(theta_LMO_t)-math.sin(RAAN_LMO)*math.cos(i_LMO)*math.sin(theta_LMO_t),
                          -math.cos(RAAN_LMO)*math.sin(theta_LMO_t) - math.sin(RAAN_LMO)*math.cos(i_LMO)*math.cos(theta_LMO_t),
                          math.sin(RAAN_LMO)*math.sin(i_LMO)],
                   [math.sin(RAAN_LMO) * math.cos(theta_LMO_t) + math.cos(RAAN_LMO) * math.cos(i_LMO) * math.sin(theta_LMO_t),
@@ -39,7 +39,7 @@ def generate_states(time):
                    -math.cos(RAAN_LMO) * math.sin(i_LMO)],
                   [math.sin(i_LMO)*math.sin(theta_LMO_t), math.sin(i_LMO)*math.cos(theta_LMO_t), math.cos(i_LMO)]])
 
-    NH_GMO = np.matrix([[math.cos(RAAN_GMO) * math.cos(theta_GMO_t) - math.sin(RAAN_GMO) * math.cos(i_GMO) * math.sin(theta_GMO_t),
+    NH_GMO = np.array([[math.cos(RAAN_GMO) * math.cos(theta_GMO_t) - math.sin(RAAN_GMO) * math.cos(i_GMO) * math.sin(theta_GMO_t),
                          -math.cos(RAAN_GMO) * math.sin(theta_GMO_t) - math.sin(RAAN_GMO) * math.cos(i_GMO) * math.cos(theta_GMO_t),
                          math.sin(RAAN_GMO) * math.sin(i_GMO)],
                         [math.sin(RAAN_GMO) * math.cos(theta_GMO_t) + math.cos(RAAN_GMO) * math.cos(i_GMO) * math.sin(theta_GMO_t),
@@ -47,10 +47,10 @@ def generate_states(time):
                          -math.cos(RAAN_GMO) * math.sin(i_GMO)],
                         [math.sin(i_GMO) * math.sin(theta_GMO_t), math.sin(i_GMO) * math.cos(theta_GMO_t), math.cos(i_GMO)]])
 
-    r_inertialframe_LMO = NH_LMO * r_orbitframe_LMO
-    v_inertialframe_LMO = NH_LMO * v_orbitframe_LMO
-    r_inertialframe_GMO = NH_GMO * r_orbitframe_GMO
-    v_inertialframe_GMO = NH_GMO * v_orbitframe_GMO
+    r_inertialframe_LMO = NH_LMO @ r_orbitframe_LMO
+    v_inertialframe_LMO = NH_LMO @ v_orbitframe_LMO
+    r_inertialframe_GMO = NH_GMO @ r_orbitframe_GMO
+    v_inertialframe_GMO = NH_GMO @ v_orbitframe_GMO
 
     return r_inertialframe_LMO, v_inertialframe_LMO, r_inertialframe_GMO, v_inertialframe_GMO
 
@@ -58,9 +58,9 @@ def generate_states(time):
 def tilde(vec):
     #  Uses Numpy Matrix column vectors to define a tilde matrix
     #  Returns a Numpy matrix
-    vec_tilde = np.matrix([[0, -vec.A1[2], vec.A1[1]],
-                           [vec.A1[2], 0, -vec.A1[0]],
-                           [-vec.A1[1], vec.A1[0], 0]])
+    vec_tilde = np.array([[0, -float(vec[2]), float(vec[1])],
+                           [float(vec[2]), 0, -float(vec[0])],
+                           [-float(vec[1]), float(vec[0]), 0]])
     return vec_tilde
 
 
@@ -76,7 +76,7 @@ def H_N(t):
     theta_dot_LMO = 0.000884797  # [rad/s]
     theta_LMO = math.radians(60) + theta_dot_LMO * t
 
-    HN = np.matrix([[math.cos(RAAN_LMO)*math.cos(theta_LMO)-math.sin(RAAN_LMO)*math.cos(i_LMO)*math.sin(theta_LMO),
+    HN = np.array([[math.cos(RAAN_LMO)*math.cos(theta_LMO)-math.sin(RAAN_LMO)*math.cos(i_LMO)*math.sin(theta_LMO),
                      math.sin(RAAN_LMO) * math.cos(theta_LMO) + math.cos(RAAN_LMO) * math.cos(i_LMO) * math.sin(theta_LMO),
                      math.sin(i_LMO)*math.sin(theta_LMO)],
                     [-math.cos(RAAN_LMO)*math.sin(theta_LMO) - math.sin(RAAN_LMO)*math.cos(i_LMO)*math.cos(theta_LMO),
@@ -88,31 +88,31 @@ def H_N(t):
 
 def Rs_N(t):
     # Calculates the 'Inertial-to-Sun-Pointing Frame' DCM
-    RsN = np.matrix([[-1, 0, 0], [0, 0, 1], [0, 1, 0]])
+    RsN = np.array([[-1, 0, 0], [0, 0, 1], [0, 1, 0]])
     return RsN
 
 
 def RsN_rate(t):
     # Returns the Rotation rate vector for the Sun-pointing frame in the inertial frame
     # Sun-pointing frame defined as an inertial frame for this project
-    w_RsN = np.matrix([[0], [0], [0]])
+    w_RsN = np.array([[0], [0], [0]])
     return w_RsN
 
 
 def Rn_N(t):
     # Calculates the 'Inertial-to-Nadir Pointing Frame' DCM as a function of time
-    Rn_H = np.matrix([[-1, 0, 0], [0, 1, 0], [0, 0, -1]])
+    Rn_H = np.array([[-1, 0, 0], [0, 1, 0], [0, 0, -1]])
     HN = H_N(t)
-    RnN = Rn_H * HN
+    RnN = Rn_H @ HN
     return RnN
 
 
 def RnN_rate(t):
     # Calculates the rotation rate vector of the Nadir pointing frame in the inertial frame as a function of time
     theta_dot_LMO = 0.000884797  # [rad/s]
-    w_dot_H = np.matrix([[0], [0], [theta_dot_LMO]])  # expressed in Rn frame (w_H and w_Rn are the same)
+    w_dot_H = np.array([[0], [0], [theta_dot_LMO]])  # expressed in Rn frame (w_H and w_Rn are the same)
     N_H = H_N(t).T
-    return N_H*w_dot_H
+    return N_H @ w_dot_H
 
 
 def Rc_N(t):
@@ -122,13 +122,14 @@ def Rc_N(t):
     dr = r_N_GMO - r_N_LMO
     dr_unit = dr/mag(dr)
     r1 = -dr_unit
-    n3 = np.matrix([[0], [0], [1]])
-    r2_notunit = np.matrix(np.cross(dr_unit.T, n3.T)).T
+    n3 = np.array([[0], [0], [1]])
+    r2_notunit = np.array(np.cross(dr_unit.T, n3.T)).T
     r2 = r2_notunit/mag(r2_notunit)
-    r3_notunit = np.matrix(np.cross(r1.T, r2.T)).T
+    r3_notunit = np.array(np.cross(r1.T, r2.T)).T
     r3 = r3_notunit/mag(r3_notunit)
 
-    N_Rc = np.matrix([[r1.A1[0], r2.A1[0], r3.A1[0]], [r1.A1[1], r2.A1[1], r3.A1[1]], [r1.A1[2], r2.A1[2], r3.A1[2]]])
+    #N_Rc = np.array([[r1[0], r2[0], r3[0]], [r1[1], r2[1], r3[1]], [r1[2], r2[2], r3[2]]])
+    N_Rc = np.concatenate((r1,r2,r3),axis=1)
     RcN = N_Rc.T
     return RcN
 
@@ -138,9 +139,9 @@ def RcN_rate(t):
     RcN1 = Rc_N(t)
     RcN2 = Rc_N(t-1)
     dC = (RcN1 - RcN2)
-    w_tilde = -dC * RcN1.T
-    w_RcN = np.matrix([[-w_tilde[1, 2]], [w_tilde[0, 2]], [-w_tilde[0, 1]]])
-    return RcN1.T*w_RcN
+    w_tilde = -dC @ RcN1.T
+    w_RcN = np.array([[-w_tilde[1, 2]], [w_tilde[0, 2]], [-w_tilde[0, 1]]])
+    return RcN1.T @ w_RcN
 
 
 def check_for_shadow_set(MRP):
@@ -153,30 +154,57 @@ def check_for_shadow_set(MRP):
 
 def check_for_shadow_set_Q(Q):
     # Checks if the MRPs should be switched to the shadow set. If not, it returns itself
-    if Q.A1[0] < -0.1:
+    if Q[0] < -0.1:
         return -Q
     else:
         return Q
 
 
-def MRP2DCM(sigma):
+def MRP_to_DCM(sigma):
     # Calculates a DCM from an MRP set. sigma must be a numpy matrix column vector
-    DCM = np.identity(3) + (1/(1 + mag(sigma)**2)**2) * (8*tilde(sigma)**2 - 4*(1-mag(sigma)**2)*tilde(sigma))
+    DCM = np.identity(3) + (1/(1 + mag(sigma)**2)**2) * (8*tilde(sigma)@tilde(sigma) - 4*(1-mag(sigma)**2)*tilde(sigma))
     return DCM
 
 
-def DCM2MRP(DCM):
+def DCM_to_MRP(DCM):
     # Calculates MRPs from a DCM. DCM must be a 3x3 numpy matrix
+    # Returns a 3x3 numpy array
     Q = DCM_to_Quaternion(DCM)
-    sigma1 = Q.A1[1]/(1 + Q.A1[0])
-    sigma2 = Q.A1[2]/(1 + Q.A1[0])
-    sigma3 = Q.A1[3]/(1 + Q.A1[0])
-    sigma = check_for_shadow_set(np.matrix([[sigma1], [sigma2], [sigma3]]))
+    sigma1 = float(Q[1]/(1 + Q[0]))
+    sigma2 = float(Q[2]/(1 + Q[0]))
+    sigma3 = float(Q[3]/(1 + Q[0]))
+    sigma = check_for_shadow_set(np.array([[sigma1], [sigma2], [sigma3]]))
     return sigma
+
+
+def mrp_difference(MRP3, MRP1):
+    # Calculates the relative orientation between two frames expressed as 2 MRP sets, such that "mrp1 + mrp2 = mrp3"
+    # Output is constrained to mag(sigma) < 1
+    # Returns a 3x1 numpy array
+
+    M1 = np.linalg.norm(MRP1)**2
+    M3 = np.linalg.norm(MRP3)**2
+    denom = (1 + (M1*M3) + np.dot(2*MRP1.T, MRP3))
+    #print("denom = ", denom)
+
+    if abs(denom) < 0.1:    # This check is added to switch an MRP if the addition equation is near singular
+        if M1 > M3:
+            MRP1 = (-1/(mag(MRP1)**2)) * MRP1
+        else:
+            MRP3 = (-1/(mag(MRP3)**2)) * MRP3
+    
+    MRP2 = ((1-M1)*MRP3 - (1-M3)*MRP1 + 2*np.cross(MRP3, MRP1, axis=0)) / (1 + (M1*M3) + np.dot(2*MRP1.T, MRP3)) 
+    # This is singular if the denominator goes to zero.. (-3 pts in homework, the above check was added)
+
+    if np.linalg.norm(MRP2) > 1:
+        MRP2 = (-1/(np.linalg.norm(MRP2)**2)) * MRP2
+    
+    return MRP2
 
 
 def DCM_to_Quaternion(DCM):
     # Calculates quaternions from a DCM using Shepard's Method
+    # returns 4x1 numpy array
     B0_sqrd = 0.25 * (1 + np.trace(DCM))
     B1_sqrd = 0.25 * (1 + 2 * DCM[0, 0] - np.trace(DCM))
     B2_sqrd = 0.25 * (1 + 2 * DCM[1, 1] - np.trace(DCM))
@@ -207,41 +235,45 @@ def DCM_to_Quaternion(DCM):
         B1 = (DCM[2, 0] + DCM[0, 2]) / (4 * B3)
         B2 = (DCM[1, 2] + DCM[2, 1]) / (4 * B3)
 
-    Q = np.matrix([[B0], [B1], [B2], [B3]])
+    Q = np.array([[B0], [B1], [B2], [B3]])
     Q = Q/mag(Q)
     return Q
 
 def Quaternion_to_MRP(Q):
-    B0 = Q.A1[0]
-    B1 = Q.A1[1]
-    B2 = Q.A1[2]
-    B3 = Q.A1[3]
+    # Direct conversion from quaternion to MRP
+    # returns 3x1 numpy array
+    B0 = Q[0]
+    B1 = Q[1]
+    B2 = Q[2]
+    B3 = Q[3]
 
     s1 = B1/(1+B0)
     s2 = B2/(1+B0)
     s3 = B3/(1+B0)
 
-    MRP = np.matrix([[s1],[s2],[s3]])
+    MRP = np.array([[s1],[s2],[s3]])
     return MRP
 
 def MRP_to_Quaternion(MRP):
+    # Direct conversion from MRP to Quaternion
+    # returns a 4x1 numpy array
     sigma_2 = np.linalg.norm(MRP)**2
     B0 = (1 - sigma_2)/(1 + sigma_2)
-    B1 = 2*MRP.A1[0]/(1 + sigma_2)
-    B2 = 2*MRP.A1[1]/(1 + sigma_2)
-    B3 = 2*MRP.A1[2]/(1 + sigma_2)
+    B1 = 2*MRP[0]/(1 + sigma_2)
+    B2 = 2*MRP[1]/(1 + sigma_2)
+    B3 = 2*MRP[2]/(1 + sigma_2)
 
-    Q = np.matrix([[B0],[B1],[B2],[B3]])
-
+    Q = np.array([[B0],[B1],[B2],[B3]])
     return Q
 
 def attitude_error(t, sigma_bn, b_w_BN, RN_funct, wRN_funct):
     # Calculates the attitude error and rate error based on current states and current reference
-    BN = MRP2DCM(sigma_bn)
-    BR = BN * RN_funct(t).T
+    BN = MRP_to_DCM(sigma_bn)
+    BR = BN @ RN_funct(t).T
     wRN = wRN_funct(t)
-    sigma_BR = DCM2MRP(BR)  # calculates the attitude error
-    b_wBR = b_w_BN - BN*wRN  # calculates rate error in body frame
+    sigma_BR = DCM_to_MRP(BR)  # calculates the attitude error
+    #print(sigma_BR)
+    b_wBR = b_w_BN - BN @ wRN  # calculates rate error in body frame
     return sigma_BR, b_wBR
 
 
@@ -256,43 +288,52 @@ def evaluate_control_reference(time, sigmaBN, wBN, control_reference=None):
         angle = math.degrees(math.acos(np.dot(r_N_LMO.T, r_N_GMO)/(mag(r_N_LMO)*mag(r_N_GMO))))
 
         # Evaluate which mission mode/reference frame is desired
-        if r_N_LMO.A1[1] > 0:   # If LMO spacecraft is 'in the sun'
+        if r_N_LMO[1] > 0:   # If LMO spacecraft is 'in the sun'
             control_reference = 'Sun-Track'
         elif angle < 35:      # If GMO spacecraft is visible by LMO spacecraft
             control_reference = 'GMO-Point'
         else:   # if neither of these are true, point at Mars and do science
             control_reference = 'Nadir-Point'
 
+    
     # Evaluate the current attitude and rate errors
     if control_reference == 'Sun-Track':
         sigmaBR, wBR = attitude_error(time, sigmaBN, wBN, Rs_N, RsN_rate)
+        #print(sigmaBR)
+        #print(wBR)
         u = -K * sigmaBR - P * wBR
+        #print(u)
         mission_mode = control_reference
     elif control_reference == 'Nadir-Point':
         sigmaBR, wBR = attitude_error(time, sigmaBN, wBN, Rn_N, RnN_rate)
+        #print(sigmaBR)
+        #print(wBR)
         u = -K * sigmaBR - P * wBR
         mission_mode = control_reference
     elif control_reference == 'GMO-Point':
         sigmaBR, wBR = attitude_error(time, sigmaBN, wBN, Rc_N, RcN_rate)
+        #print(sigmaBR)
+        #print(wBR)
         u = -K * sigmaBR - P * wBR
         mission_mode = control_reference
     elif control_reference is None:
-        sigmaBR = np.matrix([[0], [0], [0]])
-        wBR = np.matrix([[0], [0], [0]])
+        sigmaBR = np.array([[0], [0], [0]])
+        wBR = np.array([[0], [0], [0]])
         u = -K * sigmaBR - P * wBR
         mission_mode = 'None'
     else:
-        sigmaBR = np.matrix([[0], [0], [0]])
-        wBR = np.matrix([[0], [0], [0]])
+        sigmaBR = np.array([[0], [0], [0]])
+        wBR = np.array([[0], [0], [0]])
         u = control_reference
         mission_mode = 'Manual Control'
 
+    #print(u)
     return u, sigmaBR, wBR, mission_mode
 
 
 def ODE(state_vector, control_vector):
     # Ordinary differential equations for MRPs and omegas for our system/spacecraft
-    I = np.matrix([[10, 0, 0],
+    I = np.array([[10, 0, 0],
                    [0, 5, 0],
                    [0, 0, 7.5]])
     sigma = state_vector[0:3]
@@ -302,13 +343,16 @@ def ODE(state_vector, control_vector):
     # MRP Kinematic Differential Equations
     s_tilde = tilde(sigma)
     s2 = mag(sigma)**2
-    s_dot = 0.25*((1 - s2)*np.identity(3) + 2*s_tilde + 2*sigma*sigma.T)*w
+    s_dot = 0.25*((1 - s2)*np.identity(3) + 2*s_tilde + 2*sigma @ sigma.T) @ w
+    #print("s_dot: ", s_dot)
 
     # Angular Rate Kinematic Differential Equations
-    w1_dot = -((I[2, 2] - I[1, 1]) / I[0, 0]) * w.A1[1] * w.A1[2] + (u.A1[0]/I[0, 0])
-    w2_dot = -((I[0, 0] - I[2, 2]) / I[1, 1]) * w.A1[2] * w.A1[0] + (u.A1[1]/I[1, 1])
-    w3_dot = -((I[1, 1] - I[0, 0]) / I[2, 2]) * w.A1[0] * w.A1[1] + (u.A1[2]/I[2, 2])
-    w_dot = np.matrix([[w1_dot], [w2_dot], [w3_dot]])
+    #print(u)
+    w1_dot = -((I[2, 2] - I[1, 1]) / I[0, 0]) * w[1] * w[2] + (u[0]/I[0, 0])
+    w2_dot = -((I[0, 0] - I[2, 2]) / I[1, 1]) * w[2] * w[0] + (u[1]/I[1, 1])
+    w3_dot = -((I[1, 1] - I[0, 0]) / I[2, 2]) * w[0] * w[1] + (u[2]/I[2, 2])
+    w_dot = np.array([[float(w1_dot)], [float(w2_dot)], [float(w3_dot)]])
+    #print("w_dot: ", w_dot)
 
     state_dot = np.concatenate((s_dot, w_dot), axis=0)
     return state_dot
@@ -318,11 +362,12 @@ def integrate(initial_state, time, control_reference=None):
     # Setup initial values/lists to build on
     int_time = np.linspace(0, time, time+1)
     state = [initial_state]
-    state_Q = [DCM_to_Quaternion(MRP2DCM(np.matrix([[state[0].A1[0], state[0].A1[1], state[0].A1[2]]])))]
-    att_err = [np.matrix([[0], [0], [0]])]
-    att_err_Q = [np.matrix([[1], [0], [0], [0]])]
-    rate_err = [np.matrix([[0], [0], [0]])]
-    control = [np.matrix([[0], [0], [0]])]
+    #state_Q = [DCM_to_Quaternion(MRP_to_DCM(np.array([[state[0][0], state[0][1], state[0][2]]])))]
+    state_Q = [DCM_to_Quaternion(MRP_to_DCM(initial_state[0:3]))]
+    att_err = [np.array([[0], [0], [0]])]
+    att_err_Q = [np.array([[1], [0], [0], [0]])]
+    rate_err = [np.array([[0], [0], [0]])]
+    control = [np.array([[0], [0], [0]])]
     mission_mode = ['Initialization']
 
     # Perform Runge-Kutta 4th Order Integration for specified time
@@ -330,20 +375,20 @@ def integrate(initial_state, time, control_reference=None):
         sigmaBN = state[t][:3]
         wBN = state[t][3:]
         u, sigmaBR, wBR, mode = evaluate_control_reference(t, sigmaBN, wBN, control_reference)
-
+        
         k1 = ODE(state[t], u)
         k2 = ODE(state[t] + 0.5*k1, u)
         k3 = ODE(state[t] + 0.5*k2, u)
         k4 = ODE(state[t] + k3, u)
         new_state = state[t] + (1/6)*(k1 + 2*k2 + 2*k3 + k4)
         new_state[0:3] = check_for_shadow_set(new_state[0:3])
-        new_state_Q = DCM_to_Quaternion(MRP2DCM(new_state[0:3]))
+        new_state_Q = DCM_to_Quaternion(MRP_to_DCM(new_state[0:3]))
         new_state_Q = check_for_shadow_set_Q(new_state_Q)
 
         # Save results from current time step
         state.append(new_state)
         att_err.append(sigmaBR)
-        att_err_Q.append(DCM_to_Quaternion(MRP2DCM(sigmaBR)))
+        att_err_Q.append(DCM_to_Quaternion(MRP_to_DCM(sigmaBR)))
         rate_err.append(wBR)
         control.append(u)
         mission_mode.append(mode)
@@ -356,65 +401,65 @@ def plot_data(data, title):
     t = data[0]
 
     plt.figure()
-    plt.plot(t, [item.A1[0] for item in data[6]])
-    plt.plot(t, [item.A1[1] for item in data[6]])
-    plt.plot(t, [item.A1[2] for item in data[6]])
-    plt.plot(t, [item.A1[3] for item in data[6]])
+    plt.plot(t, [item[0] for item in data[6]])
+    plt.plot(t, [item[1] for item in data[6]])
+    plt.plot(t, [item[2] for item in data[6]])
+    plt.plot(t, [item[3] for item in data[6]])
     plt.title(title + ": Spacecraft Attitude [Quaternions] vs. Time")
     plt.xlabel('Time from Epoch [sec]')
     plt.ylabel('Body Attitude [Quaternions]')
     plt.legend(['Q0', 'Q1', 'Q2', 'Q3'])
 
     plt.figure()
-    plt.plot(t, [item.A1[0] for item in data[7]])
-    plt.plot(t, [item.A1[1] for item in data[7]])
-    plt.plot(t, [item.A1[2] for item in data[7]])
-    plt.plot(t, [item.A1[3] for item in data[7]])
+    plt.plot(t, [item[0] for item in data[7]])
+    plt.plot(t, [item[1] for item in data[7]])
+    plt.plot(t, [item[2] for item in data[7]])
+    plt.plot(t, [item[3] for item in data[7]])
     plt.title(title + ": Spacecraft Attitude Error vs. Time")
     plt.xlabel('Time from Epoch [sec]')
     plt.ylabel('Body Attitude [Quaternions]')
     plt.legend(['Q0', 'Q1', 'Q2', 'Q3'])
 
     plt.figure()
-    plt.plot(t, [item.A1[0] for item in data[1]])
-    plt.plot(t, [item.A1[1] for item in data[1]])
-    plt.plot(t, [item.A1[2] for item in data[1]])
+    plt.plot(t, [item[0] for item in data[1]])
+    plt.plot(t, [item[1] for item in data[1]])
+    plt.plot(t, [item[2] for item in data[1]])
     plt.title(title + ": Spacecraft Attitude vs. Time")
     plt.xlabel('Time from Epoch [sec]')
     plt.ylabel('Body Attitude [MRP]')
     plt.legend(['Sigma1', 'Sigma2', 'Sigma3'])
 
     plt.figure()
-    plt.plot(t, [item.A1[3] for item in data[1]])
-    plt.plot(t, [item.A1[4] for item in data[1]])
-    plt.plot(t, [item.A1[5] for item in data[1]])
+    plt.plot(t, [item[3] for item in data[1]])
+    plt.plot(t, [item[4] for item in data[1]])
+    plt.plot(t, [item[5] for item in data[1]])
     plt.title(title + ': Angular Rates vs. Time')
     plt.xlabel('Time from Epoch [sec]')
     plt.ylabel('Body Rates [Rad/Sec]')
     plt.legend(['w1', 'w2', 'w3', '0'])
 
     plt.figure()
-    plt.plot(t, [item.A1[0] for item in data[2]])
-    plt.plot(t, [item.A1[1] for item in data[2]])
-    plt.plot(t, [item.A1[2] for item in data[2]])
+    plt.plot(t, [item[0] for item in data[2]])
+    plt.plot(t, [item[1] for item in data[2]])
+    plt.plot(t, [item[2] for item in data[2]])
     plt.title(title + ': Attitude Error (MRPs) vs. Time')
     plt.xlabel('Time from Epoch [sec]')
     plt.ylabel('Attitude Error [MRP]')
     plt.legend(['Sigma1', 'Sigma2', 'Sigma3'])
 
     plt.figure()
-    plt.plot(t, [item.A1[0] for item in data[3]])
-    plt.plot(t, [item.A1[1] for item in data[3]])
-    plt.plot(t, [item.A1[2] for item in data[3]])
+    plt.plot(t, [item[0] for item in data[3]])
+    plt.plot(t, [item[1] for item in data[3]])
+    plt.plot(t, [item[2] for item in data[3]])
     plt.title(title + ': Rate Error vs. Time')
     plt.xlabel('Time from Epoch [sec]')
     plt.ylabel('Rate Error [Rad/Sec]')
     plt.legend(['w1', 'w2', 'w3', '0'])
 
     plt.figure()
-    plt.plot(t, [item.A1[0] for item in data[5]])
-    plt.plot(t, [item.A1[1] for item in data[5]])
-    plt.plot(t, [item.A1[2] for item in data[5]])
+    plt.plot(t, [item[0] for item in data[5]])
+    plt.plot(t, [item[1] for item in data[5]])
+    plt.plot(t, [item[2] for item in data[5]])
     plt.title(title + ": Control Input vs. Time")
     plt.xlabel('Time from Epoch [sec]')
     plt.ylabel('Control Torque [N-m]')
@@ -428,12 +473,12 @@ def plot_data(data, title):
 
 def plot_conservation(data, title):
     t = data[0]
-    I = np.matrix([[10, 0, 0],
+    I = np.array([[10, 0, 0],
                    [0, 5, 0],
                    [0, 0, 7.5]])
 
-    H = [mag(item.A1[3:]*I.T) for item in data[1]]
-    T = [(0.5*item.A1[3:]*(item.A1[3:]*I.T).T).A1[0] for item in data[1]]
+    H = [mag(I@item[3:]) for item in data[1]]
+    T = [(0.5*item[3:].T@I@item[3:])[0] for item in data[1]]
 
     plt.figure()
     plt.plot(t, H)
@@ -449,8 +494,8 @@ def plot_conservation(data, title):
 
 
 if __name__ == '__main__':
-    mrp0 = np.matrix([[0], [0], [0]])
-    w0_BN = (math.pi / 180) * np.matrix([[0.5], [0.5], [0]])  # deg/s, expressed in body frame
+    mrp0 = np.array([[0], [0], [0]])
+    w0_BN = (math.pi / 180) * np.array([[0.5], [0.5], [0]])  # deg/s, expressed in body frame
     initial_state = np.concatenate((mrp0, w0_BN), axis=0)  # initial state vector (MRPs and rad/s)
 
     #Task 1
@@ -608,8 +653,10 @@ if __name__ == '__main__':
 
     print('Task 11 \n')
     t = 6500
-    full_sim = integrate(initial_state, t, control_reference='Full-Mission')
+    #full_sim = integrate(initial_state, t, control_reference='Full-Mission')
+    full_sim = integrate(initial_state, t)
     plot_data(full_sim, 'Task 11')
+    plot_conservation(full_sim, 'Task 7 Conservation')
 
     print('Part 1\n')
     t = 300
