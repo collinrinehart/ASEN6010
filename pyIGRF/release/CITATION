@@ -1,0 +1,11 @@
+References
+----------
+
+To reference pyIGRF in publications, please cite the IGRF-13 publication
+
+Alken, P., Thebault, E., Beggan, C. et al, (2020) International Geomagnetic Reference Field: the thirteenth generation, Earth Planets and Space, vol. XX, XX-XX, doi:10.XXX
+
+
+Release - initial release (prior to publication) 15-Apr-2020
+
+https://github.com/ciaranbe/pyIGRF (Latest commit 7dc1f9e)
