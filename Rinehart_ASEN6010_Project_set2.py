@@ -1,6 +1,10 @@
 import math
+import imageio as iio
+from types import FrameType
 import matplotlib.pyplot as plt
+plt.style.use( 'dark_background' )
 import numpy as np
+from pathlib import Path
 
 def tilde(vec):
     #  Uses Numpy array column vectors to define a tilde matrix
@@ -175,7 +179,7 @@ def generate_reference(t):
     # Calculates the 'Inertial-to-Hill Frame' DCM as a reference trajectory
     RAAN_LMO = math.radians(20)
     i_LMO = math.radians(30) 
-    theta_dot_LMO = 0 * 0.000884797 # [rad/s]
+    theta_dot_LMO = 10 * 0.000884797 # [rad/s]
     theta_LMO = math.radians(60) + theta_dot_LMO * t 
 
     HN = np.array([[math.cos(RAAN_LMO)*math.cos(theta_LMO)-math.sin(RAAN_LMO)*math.cos(i_LMO)*math.sin(theta_LMO),
@@ -203,28 +207,36 @@ def evaluate_control_reference(time, state, I_list, w_gframe, G_list, num_cmgs, 
     OMEGA = state[6+2*num_cmgs:6+3*num_cmgs]
     
     # Control Gains
-    K = 20 * 0.00555555555  # [Nm]
+    K = 40 * 0.00555555555  # [Nm]
     P = 20 * 0.1666666666  # [Nm/s]
    # K = .04*1.7  # [Nm]
     #P = .4*13  # [Nm/s]
-    
+    if control_reference == 'None': 
+        Lr = np.zeros((3,1))
+        sigmaBR = np.zeros((3,1))
+        b_wBR = np.zeros((3,1))
+        b_w_RN = np.zeros((3,1))
+    else:
+        if control_reference == 'Regulation':
+            RN = np.identity(3)
+            N_w_RN = np.zeros((3,1))
+            N_w_RN_dot = np.zeros((3,1))
+        else:
+            RN, N_w_RN, N_w_RN_dot = generate_reference(time)
+            b_w_RN = MRP2DCM(sigmaBN) @ N_w_RN
 
-    RN, N_w_RN, N_w_RN_dot = generate_reference(time)
-    b_w_RN = MRP2DCM(sigmaBN) @ N_w_RN
+        # Evaluate which control reference to use at the current time step
+        sigmaBR, b_wBR = attitude_error(time, sigmaBN, b_wBN, RN, N_w_RN)
 
-    # Evaluate which control reference to use at the current time step
-    sigmaBR, b_wBR = attitude_error(time, sigmaBN, b_wBN, RN, N_w_RN)
+        BN = MRP2DCM(sigmaBN)
+        b_w_RN = BN @ N_w_RN
+        b_w_RN_dot = BN @ N_w_RN_dot
 
-    BN = MRP2DCM(sigmaBN)
-    b_w_RN = BN @ N_w_RN
-    b_w_RN_dot = BN @ N_w_RN_dot
+        sum_terms = np.array([[0, 0, 0]])
+        for cmg in range(num_cmgs):
+            sum_terms = sum_terms +  (Iws*OMEGA[cmg]*w_g[cmg]*G_list[1][:,cmg] + Iws*OMEGA[cmg]*w_t[cmg]*G_list[2][:,cmg]).T
 
-    sum_terms = np.array([[0, 0, 0]])
-    for cmg in range(num_cmgs):
-        sum_terms = sum_terms +  (Iws*OMEGA[cmg]*w_g[cmg]*G_list[1][:,cmg] + Iws*OMEGA[cmg]*w_t[cmg]*G_list[2][:,cmg]).T
-    
-
-    Lr = -K * sigmaBR - P * b_wBR + I@(b_w_RN_dot - tilde(b_wBN) @ b_w_RN) + tilde(b_w_RN) @ I @ b_wBN - L + sum_terms.reshape((3,1))
+        Lr = -K * sigmaBR - P * b_wBR + I@(b_w_RN_dot - tilde(b_wBN) @ b_w_RN) + tilde(b_w_RN) @ I @ b_wBN - L + sum_terms.reshape((3,1))
 
     return Lr, sigmaBR, b_wBR, b_w_RN
 
@@ -241,9 +253,9 @@ def inertia_properties(G):
     #                 [0, 0, 113]])
 
     # Gimbal inertia in Gimbal frame
-    I_G = np.array([[.3, 0, 0],
-                    [0, .2, 0],
-                    [0, 0, .2]])
+    I_G = np.array([[.0, 0, 0],
+                    [0, .0, 0],
+                    [0, 0, .0]])
 
     # wheel inertia in wheel frame, note due to symmetry w_I_W = g_I_W
     I_W = np.array([[.0005, 0, 0],
@@ -354,6 +366,7 @@ def load_initial_conditions():
     # Wheel initial Conditions
     OMEGA_0 = [np.zeros((num_cmgs, 1))]
     OMEGA_0 = [np.array([[50],[50],[-50],[-50]])]
+    OMEGA_0 = [np.array([[10],[10],[-10],[-10]])]
 
     return mrp0, b_w_BN_0, gamma_0, gamma_dot_0, OMEGA_0, gimbal_frames_0, num_cmgs
 
@@ -379,7 +392,7 @@ def subservo(state, des_OMEGA_dot, des_gamma_dot, w_gframe, I_list, num_cmgs):
     for i in range(num_cmgs):
         if abs(u_s[i]) > rw_max_torque:
             u_s[i] = math.copysign(rw_max_torque, u_s[i])
-    print(u_s)
+    #print(u_s)
 
     #u_g = np.array([J_g*gamma_dub[cmg] - (J_s-J_t)*w_s[cmg]*w_t[cmg] - I_ws*OMEGA[cmg]*w_t[cmg] for cmg in range(num_cmgs)])
     u_g = np.zeros((num_cmgs,1))
@@ -477,7 +490,7 @@ def steering_law(t, state, Lr, I_list, w_gframe, G_list, b_w_RN, num_cmgs):
     eta_dot = eta_dot_control #+ eta_dot_null
 
     OMEGA_dot_des = eta_dot[0:num_cmgs]
-    gamma_dot_des = eta_dot[num_cmgs:2*num_cmgs]
+    #gamma_dot_des = eta_dot[num_cmgs:2*num_cmgs]
     gamma_dot_des = np.zeros((num_cmgs,1))
     return OMEGA_dot_des, gamma_dot_des, kappa, d_singular
 
@@ -570,7 +583,7 @@ def ODE(state_vector, control_vector, inertia_list, num_cmgs, G_0, gamma_0):
 
 def integrate(time, control_reference=None):
     # Setup initial values/lists to build on
-    time_step = 0.2 # integration time step in seconds
+    time_step = 0.5 # integration time step in seconds
     int_time = np.linspace(0, time, (int(time/time_step))+1)
 
     # Load initial conditions and build initial lists to build on
@@ -686,16 +699,16 @@ def plot_states(data, title):
     # plt.legend(['gamma1', 'gamma2', 'gamma3', 'gamma4'])
     # plt.grid(True)
 
-    # plt.figure()
-    # plt.plot(t, [item[0] for item in data[4]])
-    # plt.plot(t, [item[1] for item in data[4]])
-    # plt.plot(t, [item[2] for item in data[4]])
-    # plt.plot(t, [item[3] for item in data[4]])
-    # plt.title(title + ': Gamma_dot vs. Time')
-    # plt.xlabel('Time from Epoch [sec]')
-    # plt.ylabel('Rates [Rad/Sec]')
-    # plt.legend(['gamma_dot1', 'gamma_dot2', 'gamma_dot3', 'gamma_dot4'])
-    # plt.grid(True)
+    plt.figure()
+    plt.plot(t, [item[0] for item in data[4]])
+    plt.plot(t, [item[1] for item in data[4]])
+    plt.plot(t, [item[2] for item in data[4]])
+    plt.plot(t, [item[3] for item in data[4]])
+    plt.title(title + ': Gamma_dot vs. Time')
+    plt.xlabel('Time from Epoch [sec]')
+    plt.ylabel('Rates [Rad/Sec]')
+    plt.legend(['gamma_dot1', 'gamma_dot2', 'gamma_dot3', 'gamma_dot4'])
+    plt.grid(True)
 
     plt.figure()
     plt.plot(t, [item[0] for item in data[5]])
@@ -866,10 +879,10 @@ def plot_conservation(data, title):
             #w_t = data[8][i][cmg][1]
             #w_g = data[8][i][cmg][2]
 
-            H_G_vec_terms = H_G_vec_terms + ((np.asarray(
-                                                    (I_gs*w_s[cmg]*Gs[:,cmg]) 
-                                                    + (I_gt*w_t[cmg]*Gt[:,cmg]) 
-                                                    + I_gg*(w_g[cmg] + gamma_dot[i][cmg])*Gg[:,cmg])).reshape((3,1)))
+            # H_G_vec_terms = H_G_vec_terms + ((np.asarray(
+            #                                         (I_gs*w_s[cmg]*Gs[:,cmg]) 
+            #                                         + (I_gt*w_t[cmg]*Gt[:,cmg]) 
+            #                                         + I_gg*(w_g[cmg] + gamma_dot[i][cmg])*Gg[:,cmg])).reshape((3,1)))
                                                     
 
             H_W_vec_terms = H_W_vec_terms + (np.asarray(
@@ -901,7 +914,8 @@ def plot_conservation(data, title):
         T_dot_diff.append(T_dot[i]-T_dot_inputs[i])
         #T.append(T_terms[0])
         #H_tot_vec_N.append(BN[i].T @ H_B_vec_b[i])
-        H_tot_vec_N.append(BN[i].T @ (H_B_vec_b[i] + H_G_vec_b[i] + H_W_vec_b[i]))
+        #H_tot_vec_N.append(BN[i].T @ (H_B_vec_b[i] + H_G_vec_b[i] + H_W_vec_b[i]))
+        H_tot_vec_N.append(BN[i].T @ (H_B_vec_b[i] + H_W_vec_b[i]))
         #H_tot_vec_N.append((H_B_vec_b[i] + H_G_vec_b[i] + H_W_vec_b[i]))
         Hmag.append(mag(H_tot_vec_N[i]))
     
@@ -1022,13 +1036,338 @@ def plot_checks(data, title):
     plt.grid(True)
 
 
+def plot_reference_frames( frames, args={}, vectors = [], plots = [], planes = [] ):
+	_args = {
+		'figsize'       : ( 12, 12 ),
+		'base_frame'    : True,
+		'base_color'    : 'w',
+		'base_label'    : 'Inertial',
+		'frame_labels'  : [ '' ] * len( frames ),
+		'frame_colors'  : [ 'm', 'c', 'b' ],
+		'frame_zorders' : [ 10 ] * len( frames ),
+		'vector_colors' : [ 'm', 'c', 'b' ],
+		'vector_labels' : [ '' ] * len( vectors ),
+		'vector_texts'  : True,
+		'plots_labels'  : [ '' ] * len( plots ),
+		'plots_colors'  : [ 'm' ],
+		'plots_styles'  : [ '-' ] * len( plots ),
+		'eq_plane'      : False,
+		'eq_plane_color': 'c',
+		'plane_labels'  : [ '' ] * len( planes ),
+		'plane_colors'  : [ 'w' ],
+		'plane_alphas'  : [ 0.3 ] * len( planes ),
+		'no_axes'       : True,
+		'axes_no_fill'  : False,
+		'legend'        : True,
+		'xlabel'        : 'X',
+		'ylabel'        : 'Y',
+		'zlabel'        : 'Z',
+		'xlim'          : 1,
+		'ylim'          : 1,
+		'zlim'          : 1,
+		'title'         : '',
+		'azimuth'       : None,
+		'elevation'     : None,
+		'show'          : False,
+		'filename'      : False,
+		'dpi'           : 300,
+		'frame_text_scale' : 1.1,
+		'vector_text_scale': 1.3
+	}
+	for key in args.keys():
+		_args[ key ] = args[ key ]
+    
+	fig      = plt.figure( figsize = _args[ 'figsize' ] )
+	ax       = fig.add_subplot( 111, projection = '3d'  )
+	zeros    = [ 0.0, 0.0, 0.0 ]
+	n        = 0
+	identity = [ [ 1, 0, 0 ], [ 0, 1, 0 ], [ 0, 0, 1 ] ]
+    
+	for frame in frames:
+		'''
+		The frame is passed into the quiver method by rows, but they
+		are being plotted by columns. So the 3 basis vectors of the frame
+		are the columns of the 3x3 matrix
+		'''
+
+		ax.quiver( zeros, zeros, zeros,
+			frame[ 0, : ], frame[ 1, : ], frame[ 2, : ],
+			color  = _args[ 'frame_colors'  ][ n ],
+			label  = _args[ 'frame_labels'  ][ n ],
+			zorder = _args[ 'frame_zorders' ][ n ] )
+
+		if _args[ 'vector_texts' ]:
+			frame *= _args[ 'frame_text_scale' ]
+			ax.text( frame[ 0, 0 ], frame[ 1, 0 ], frame[ 2, 0 ], 'X',
+				color = _args[ 'frame_colors' ][ n ] )
+			ax.text( frame[ 0, 1 ], frame[ 1, 1 ], frame[ 2, 1 ], 'Y',
+				color = _args[ 'frame_colors' ][ n ] )
+			ax.text( frame[ 0, 2 ], frame[ 1, 2 ], frame[ 2, 2 ], 'Z',
+				color = _args[ 'frame_colors' ][ n ] )
+		n += 1
+
+	if _args[ 'base_frame' ]:
+		ax.quiver( zeros, zeros, zeros,
+			identity[ 0 ], identity[ 1 ], identity[ 2 ],
+			color  = _args[ 'base_color' ],
+			label  = _args[ 'base_label' ],
+			zorder = 0 )
+
+		if _args[ 'vector_texts' ]:
+			ax.text( _args[ 'frame_text_scale' ], 0, 0, 'X',
+				color = _args[ 'base_color' ] )
+			ax.text( 0, _args[ 'frame_text_scale' ], 0, 'Y',
+				color = _args[ 'base_color' ] )
+			ax.text( 0, 0, _args[ 'frame_text_scale' ], 'Z',
+				color = _args[ 'base_color' ] )
+	n = 0
+	for plot in plots:
+		ax.plot( plot[ :, 0 ], plot[ :, 1 ], plot[ :, 2 ],
+			_args[ 'plots_colors' ][ n ] + _args[ 'plots_styles' ][ n ],
+			label = _args[ 'plots_labels' ][ n ] )
+		n += 1
+
+	n = 0
+	for vector in vectors:
+		ax.quiver( 0, 0, 0,
+			vector[ 0 ], vector[ 1 ], vector[ 2 ],
+			color = _args[ 'vector_colors' ][ n ],
+			label = _args[ 'vector_labels' ][ n ] )
+
+		if _args[ 'vector_texts' ]:
+			vector *= _args[ 'vector_text_scale' ]
+			ax.text( vector[ 0 ], vector[ 1 ], vector[ 2 ],
+				_args[ 'vector_labels' ][ n ],
+				color = _args[ 'vector_colors' ][ n ] )
+		n += 1
+
+	n = 0
+	for plane in planes:
+		ax.plot_surface( plane[ 0 ], plane[ 1 ], plane[ 2 ],
+			color  = _args[ 'plane_colors' ][ n ],
+			alpha  = _args[ 'plane_alphas' ][ n ],
+			zorder = 0 )
+
+	ax.set_xlabel( _args[ 'xlabel' ] )
+	ax.set_ylabel( _args[ 'ylabel' ] )
+	ax.set_zlabel( _args[ 'zlabel' ] )
+	ax.set_xlim( [ -_args[ 'xlim' ], _args[ 'xlim' ] ] )
+	ax.set_ylim( [ -_args[ 'ylim' ], _args[ 'ylim' ] ] )
+	ax.set_zlim( [ -_args[ 'zlim' ], _args[ 'zlim' ] ] )
+	ax.set_box_aspect( [ 1, 1, 1 ] )
+	ax.set_title( _args[ 'title' ] )
+
+	if _args[ 'legend' ]:
+		ax.legend()
+
+	if _args[ 'no_axes' ]:
+		ax.set_axis_off()
+
+	if _args[ 'axes_no_fill' ]:
+		ax.w_xaxis.pane.fill = False
+		ax.w_yaxis.pane.fill = False
+		ax.w_zaxis.pane.fill = False
+
+	if _args[ 'azimuth' ] is not None:
+		ax.view_init( elev = _args[ 'elevation' ],
+					  azim = _args[ 'azimuth'   ] )
+
+	if _args[ 'show' ]:
+		plt.show()
+        
+
+	if _args[ 'filename' ]:
+		plt.savefig( _args[ 'filename' ], dpi = _args[ 'dpi' ] )
+		print( 'Saved', _args[ 'filename' ] )
+
+	plt.close()
+
+
+def plot_orbits( rs, args, vectors = [] ):
+	_args = {
+		'figsize'      : ( 10, 8 ),
+		'labels'       : [ '' ] * len( rs ),
+		'colors'       : COLORS[ : ],
+		'traj_lws'     : 3,
+		'dist_unit'    : 'km',
+		'groundtracks' : False,
+		'cb_radius'    : 6378.0,
+		'cb_SOI'       : None,
+		'cb_SOI_color' : 'c',
+		'cb_SOI_alpha' : 0.7,
+		'cb_axes'      : True,
+		'cb_axes_mag'  : 2,
+		'cb_cmap'      : 'Blues',
+		'cb_axes_color': 'w',
+		'axes_mag'     : 0.8,
+		'axes_custom'  : None,
+		'title'        : 'Trajectories',
+		'legend'       : True,
+		'axes_no_fill' : True,
+		'hide_axes'    : False,
+		'azimuth'      : False,
+		'elevation'    : False,
+		'show'         : False,
+		'filename'     : False,
+		'dpi'          : 300,
+		'vector_colors': [ '' ] * len( vectors ),
+		'vector_labels': [ '' ] * len( vectors ),
+		'vector_texts' : False
+	}
+	for key in args.keys():
+		_args[ key ] = args[ key ]
+
+	fig = plt.figure( figsize = _args[ 'figsize' ] )
+	ax  = fig.add_subplot( 111, projection = '3d'  )
+
+	max_val = 0
+	n       = 0
+
+	for r in rs:
+		_r = r.copy() * dist_handler[ _args[ 'dist_unit' ] ]
+
+		ax.plot( _r[ :, 0 ], _r[ :, 1 ], _r[ : , 2 ],
+			color = _args[ 'colors' ][ n ], label = _args[ 'labels' ][ n ],
+			zorder = 10, linewidth = _args[ 'traj_lws' ] )
+		ax.plot( [ _r[ 0, 0 ] ], [ _r[ 0 , 1 ] ], [ _r[ 0, 2 ] ], 'o',
+			color = _args[ 'colors' ][ n ] )
+
+		if _args[ 'groundtracks' ]:
+			rg  = _r / np.linalg.norm( r, axis = 1 ).reshape( ( r.shape[ 0 ], 1 ) )
+			rg *= _args[ 'cb_radius' ]
+
+			ax.plot( rg[ :, 0 ], rg[ :, 1 ], rg[ :, 2 ], cs[ n ], zorder = 10 )
+			ax.plot( [ rg[ 0, 0 ] ], [ rg[ 0, 1 ] ], [ rg[ 0, 2 ] ], cs[ n ] + 'o', zorder = 10 )			
+
+		max_val = max( [ _r.max(), max_val ] )
+		n += 1
+
+	for vector in vectors:
+		ax.quiver( 0, 0, 0,
+			vector[ 'r' ][ 0 ], vector[ 'r' ][ 1 ], vector[ 'r' ][ 2 ],
+			color = vector[ 'color' ], label = vector[ 'label' ] )
+
+		if _args[ 'vector_texts' ]:
+			vector[ 'r' ] *= _args[ 'vector_text_scale' ]
+			ax.text( vector[ 'r' ][ 0 ], vector[ 'r' ][ 1 ], vector[ 'r' ][ 2 ],
+				vector[ 'label' ],
+				color = vector[ 'color' ] )
+
+	_args[ 'cb_radius' ] *= dist_handler[ _args[ 'dist_unit' ] ]
+	_u, _v = np.mgrid[ 0:2*np.pi:20j, 0:np.pi:20j ]
+	_x     = _args[ 'cb_radius' ] * np.cos( _u ) * np.sin( _v )
+	_y     = _args[ 'cb_radius' ] * np.sin( _u ) * np.sin( _v )
+	_z     = _args[ 'cb_radius' ] * np.cos( _v )
+	ax.plot_surface( _x, _y, _z, cmap = _args[ 'cb_cmap' ], zorder = 1 )
+
+	if _args[ 'cb_SOI' ] is not None:
+		_args[ 'cb_SOI' ] *= dist_handler[ _args[ 'dist_unit' ] ]
+		_x *= _args[ 'cb_SOI' ] / _args[ 'cb_radius' ]
+		_y *= _args[ 'cb_SOI' ] / _args[ 'cb_radius' ]
+		_z *= _args[ 'cb_SOI' ] / _args[ 'cb_radius' ]
+		ax.plot_wireframe( _x, _y, _z,
+			color = _args[ 'cb_SOI_color' ],
+			alpha = _args[ 'cb_SOI_alpha' ] )
+
+	if _args[ 'cb_axes' ]:
+		l       = _args[ 'cb_radius' ] * _args[ 'cb_axes_mag' ]
+		x, y, z = [ [ 0, 0, 0 ], [ 0, 0, 0  ], [ 0, 0, 0 ] ]
+		u, v, w = [ [ l, 0, 0 ], [ 0, l, 0 ], [ 0, 0, l ] ]
+		ax.quiver( x, y, z, u, v, w, color = _args[ 'cb_axes_color' ] )
+
+	xlabel = 'X (%s)' % _args[ 'dist_unit' ]
+	ylabel = 'Y (%s)' % _args[ 'dist_unit' ]
+	zlabel = 'Z (%s)' % _args[ 'dist_unit' ]
+
+	if _args[ 'axes_custom' ] is not None:
+		max_val = _args[ 'axes_custom' ]
+	else:
+		max_val *= _args[ 'axes_mag' ]
+
+	ax.set_xlim( [ -max_val, max_val ] )
+	ax.set_ylim( [ -max_val, max_val ] )
+	ax.set_zlim( [ -max_val, max_val ] )
+	ax.set_xlabel( xlabel )
+	ax.set_ylabel( ylabel )
+	ax.set_zlabel( zlabel )
+	ax.set_box_aspect( [ 1, 1, 1 ] )
+	ax.set_aspect( 'auto' )
+
+	if _args[ 'azimuth' ] is not False:
+		ax.view_init( elev = _args[ 'elevation' ],
+					  azim = _args[ 'azimuth'   ] )
+	
+	if _args[ 'axes_no_fill' ]:
+		ax.w_xaxis.pane.fill = False
+		ax.w_yaxis.pane.fill = False
+		ax.w_zaxis.pane.fill = False		
+
+	if _args[ 'hide_axes' ]:
+		ax.set_axis_off()
+
+	if _args[ 'legend' ]:
+		plt.legend()
+
+	if _args[ 'filename' ]:
+		plt.savefig( _args[ 'filename' ], dpi = _args[ 'dpi' ] )
+		print( 'Saved', _args[ 'filename' ] )
+
+	if _args[ 'show' ]:
+		plt.show()
+
+	plt.close()
+
+
+def make_animation(attitudes, errors):
+    i = 0
+    file_list=[]
+    file_list_raw=[]
+    for att_frame, err_frame in zip(attitudes, errors):
+        next_filename = "C:/Users/colli/Documents/Git/ASEN6010/Images/frame_" + str(i) + ".png"
+        file_list_raw.append(next_filename)
+        config = {
+        'frame_labels': ['S/C Attitude', 'Reference Frame'],
+        'show': False,
+        'filename': next_filename
+                }
+        plot_reference_frames([att_frame, err_frame], config)
+        file_list.append(iio.imread(next_filename))
+        i += 1
+    
+    images = []
+   # for file in Path("C:/Users/colli/Documents/Git/ASEN6010/Images").iterdir():
+       # im = iio.imread(file)
+       # images.append(im)
+
+    #iio.mimsave('C:/Users/colli/Documents/Git/ASEN6010/animation.gif', images, duration=0.2)
+    #iio.mimsave('C:/Users/colli/Documents/Git/ASEN6010/animation.gif', file_list)
+
+    with iio.get_writer('C:/Users/colli/Documents/Git/ASEN6010/animation.gif', mode='I') as writer:
+        for filename in file_list_raw:
+            image = iio.imread(filename)
+            writer.append_data(image)
+
+
 if __name__ == "__main__":
     # Run simulation
-    t = 500 # Simulation length in seconds
-    int_time, attitude, rates, gamma, gamma_dot, OMEGA, I_list, G_list, w_gframe, gimbal_frames_list, control, att_err, rate_err, kappa_list, d_singular_list  = integrate(t, control_reference='no_control')
-    plot_states([int_time, attitude, rates, gamma, gamma_dot, OMEGA, I_list, G_list, w_gframe, gimbal_frames_list, control, att_err, rate_err, kappa_list, d_singular_list], 'Problem 5 (No NM)')
-    plot_control([int_time, attitude, rates, gamma, gamma_dot, OMEGA, I_list, G_list, w_gframe, gimbal_frames_list, control, att_err, rate_err, kappa_list, d_singular_list], 'Problem 5 (No NM)')
-    plot_conservation([int_time, attitude, rates, gamma, gamma_dot, OMEGA, I_list, G_list, w_gframe, gimbal_frames_list, control, att_err, rate_err, kappa_list, d_singular_list], 'Problem 5 (No NM)')
-    plot_errors([int_time, attitude, rates, gamma, gamma_dot, OMEGA, I_list, G_list, w_gframe, gimbal_frames_list, control, att_err, rate_err, kappa_list, d_singular_list], 'Problem 5 (No NM)')
-    #plot_checks([int_time, attitude, rates, gamma, gamma_dot, OMEGA, I_list, G_list, w_gframe, gimbal_frames_list, control, att_err, rate_err, kappa_list, d_singular_list], 'Problem 5 (No NM)')
+    t = 1000 # Simulation length in seconds
+    int_time, attitude, rates, gamma, gamma_dot, OMEGA, I_list, G_list, w_gframe, gimbal_frames_list, control, att_err, rate_err, kappa_list, d_singular_list  = integrate(t, control_reference='None')
+    plot_states([int_time, attitude, rates, gamma, gamma_dot, OMEGA, I_list, G_list, w_gframe, gimbal_frames_list, control, att_err, rate_err, kappa_list, d_singular_list], 'Problem 5')
+    plot_control([int_time, attitude, rates, gamma, gamma_dot, OMEGA, I_list, G_list, w_gframe, gimbal_frames_list, control, att_err, rate_err, kappa_list, d_singular_list], 'Problem 5')
+    plot_conservation([int_time, attitude, rates, gamma, gamma_dot, OMEGA, I_list, G_list, w_gframe, gimbal_frames_list, control, att_err, rate_err, kappa_list, d_singular_list], 'Problem 5')
+    plot_errors([int_time, attitude, rates, gamma, gamma_dot, OMEGA, I_list, G_list, w_gframe, gimbal_frames_list, control, att_err, rate_err, kappa_list, d_singular_list], 'Problem 5')
+    #plot_checks([int_time, attitude, rates, gamma, gamma_dot, OMEGA, I_list, G_list, w_gframe, gimbal_frames_list, control, att_err, rate_err, kappa_list, d_singular_list], 'Problem 5')
+    
+    # Post process data for animations
+    attitudes = [MRP2DCM(MRP) for MRP in attitude]
+    errors = [MRP2DCM(MRP_err).T @ MRP2DCM(MRP) for MRP, MRP_err in zip(attitude,att_err)]
+    
+    
+    config = {
+        #'frame_labels': ['S/C Attitude'],
+        'show': True
+                }
+    
+    #plot_reference_frames(attitudes, config)
+    #make_animation(attitudes, errors)
     plt.show()
