@@ -203,6 +203,7 @@ def evaluate_control_reference(time, state, I_list, w_gframe, G_list, num_cmgs, 
     w_g = w_gframe[:,2]
     L = 0.0* np.ones((3,1))
     sigmaBN = state[0:3]
+    BN = MRP2DCM(sigmaBN)
     b_wBN = state[3:6]
     OMEGA = state[6+2*num_cmgs:6+3*num_cmgs]
     
@@ -211,6 +212,7 @@ def evaluate_control_reference(time, state, I_list, w_gframe, G_list, num_cmgs, 
     P = 20 * 0.1666666666  # [Nm/s]
    # K = .04*1.7  # [Nm]
     #P = .4*13  # [Nm/s]
+
     if control_reference == 'None': 
         Lr = np.zeros((3,1))
         sigmaBR = np.zeros((3,1))
@@ -223,12 +225,11 @@ def evaluate_control_reference(time, state, I_list, w_gframe, G_list, num_cmgs, 
             N_w_RN_dot = np.zeros((3,1))
         else:
             RN, N_w_RN, N_w_RN_dot = generate_reference(time)
-            b_w_RN = MRP2DCM(sigmaBN) @ N_w_RN
+
 
         # Evaluate which control reference to use at the current time step
         sigmaBR, b_wBR = attitude_error(time, sigmaBN, b_wBN, RN, N_w_RN)
-
-        BN = MRP2DCM(sigmaBN)
+        
         b_w_RN = BN @ N_w_RN
         b_w_RN_dot = BN @ N_w_RN_dot
 
@@ -246,21 +247,17 @@ def inertia_properties(G):
     # Spacecraft inertia in body frame
     I_s = np.array([[10, 0, 0],
                     [0, 5, 0],
-                    [0, 0, 7.5]])
-
-    # I_s = np.array([[86, 0, 0],
-    #                 [0, 85, 0],
-    #                 [0, 0, 113]])
+                    [0, 0, 7.5]])   # [kg*m^2]
 
     # Gimbal inertia in Gimbal frame
     I_G = np.array([[.0, 0, 0],
                     [0, .0, 0],
-                    [0, 0, .0]])
+                    [0, 0, .0]])    # [kg*m^2]
 
     # wheel inertia in wheel frame, note due to symmetry w_I_W = g_I_W
     I_W = np.array([[.0005, 0, 0],
                     [0, .0005, 0],
-                    [0, 0, .0005]])
+                    [0, 0, .0005]]) # [kg*m^2]
 
     # combined wheel and gimbal inertia, expressed in gimbal frame
     J = I_G + I_W
@@ -317,6 +314,7 @@ def load_spacecraft_configuration():
     # defines VSCMG configuration with gimbal angles of zero. Column 1 is gs, column 2 is gt and column 3 is gg for each CMG
     # Change these values or add complete matrices to change the VSCMG configuration in the spacecraft
 
+    # The configuration below describes 4x reaction wheels in a 45 deg pyrimidal configuration
     BG_0 = np.array([[math.cos(math.pi/4), 0, -math.sin(math.pi/4)],
                       [0,1,0],
                       [math.sin(math.pi/4), 0, math.cos(math.pi/4)]])
@@ -332,24 +330,18 @@ def load_spacecraft_configuration():
     BG_3 = np.array([[0,1, 0],
                       [-math.cos(math.pi/4), 0, math.sin(math.pi/4)],
                       [math.sin(math.pi/4), 0, math.cos(math.pi/4)]])
-
-    # BG_2 = np.array([[1, 0, 0],
-    #                   [0, math.sin(math.pi/4), -math.cos(math.pi/4)], 
-    #                   [0, math.cos(math.pi/4), math.sin(math.pi/4)]])
-
-    # BG_3 = np.array([[1, 0, 0],
-    #                   [0, math.sin(math.pi/4), math.cos(math.pi/4)],
-    #                   [0, -math.cos(math.pi/4), math.sin(math.pi/4)]])
-
-
     
     return BG_0, BG_1, BG_2, BG_3
 
 
 def load_initial_conditions():
+    # Spacecraft initial r and v vectors
+    position_0 = [np.array([[7000],[0],[0]])] #initial position vector (ECI)
+    velocity_0 = [np.array([[0],[6],[6]])] #initial position vector (ECI)
+    
     # Spacecraft Body Initial Conditions
     mrp0 = [np.array([[.4],[0.3],[-0.3]])] #initial attitude as a MRP
-    b_w_BN_0 = [(math.pi / 180) * np.array([[0.5], [0.5], [0.5]])]  # Initial angular velocity in deg/s, expressed in body frame and converted to rad/s
+    b_w_BN_0 = [(math.pi / 180) * np.array([[0.5], [0.05], [0.5]])]  # Initial angular velocity in deg/s, expressed in body frame and converted to rad/s
 
     # Gimbal Initial conditions and Load initial spacecraft configuration (gimbal angles = 0)
     default_gimbal_frames = load_spacecraft_configuration()
@@ -365,29 +357,29 @@ def load_initial_conditions():
 
     # Wheel initial Conditions
     OMEGA_0 = [np.zeros((num_cmgs, 1))]
-    OMEGA_0 = [np.array([[50],[50],[-50],[-50]])]
     OMEGA_0 = [np.array([[10],[10],[-10],[-10]])]
+    OMEGA_0 = [np.array([[50],[50],[-50],[-50]])]
+    
 
-    return mrp0, b_w_BN_0, gamma_0, gamma_dot_0, OMEGA_0, gimbal_frames_0, num_cmgs
+    return mrp0, b_w_BN_0, gamma_0, gamma_dot_0, OMEGA_0, gimbal_frames_0, num_cmgs, position_0, velocity_0
 
 
 def subservo(state, des_OMEGA_dot, des_gamma_dot, w_gframe, I_list, num_cmgs):
-    K_gam = 0.5  # gimbal gain [1/sec]
-
+    #K_gam = 0.5  # gimbal gain [1/sec]
 
     I_ws = I_list[3][0,0]
-    J_s = I_list[4][0,0]
-    J_t = I_list[4][1,1]
-    J_g = I_list[4][2,2]
-    w_s = w_gframe[:,0]
+    #J_s = I_list[4][0,0]
+    #J_t = I_list[4][1,1]
+    #J_g = I_list[4][2,2]
+    #w_s = w_gframe[:,0]
     w_t = w_gframe[:,1]
 
-    OMEGA = state[14:]
+    #OMEGA = state[14:]
     gamma_dot = state[10:14]
 
-    gamma_dub = -K_gam*(gamma_dot - des_gamma_dot)
+    #gamma_dub = -K_gam*(gamma_dot - des_gamma_dot)
     
-    rw_max_torque = .05 #Nm
+    rw_max_torque = .050 #Nm
     u_s = (I_ws*des_OMEGA_dot).reshape(num_cmgs,1) + (I_ws*((gamma_dot@np.ones((1,num_cmgs))) @ w_t)).reshape(num_cmgs,1)
     for i in range(num_cmgs):
         if abs(u_s[i]) > rw_max_torque:
@@ -398,8 +390,6 @@ def subservo(state, des_OMEGA_dot, des_gamma_dot, w_gframe, I_list, num_cmgs):
     u_g = np.zeros((num_cmgs,1))
     
     u_vector = np.concatenate((u_s, u_g), axis = 0)
-    
-    #print(pause)
     
     return u_vector
 
@@ -416,7 +406,7 @@ def steering_law(t, state, Lr, I_list, w_gframe, G_list, b_w_RN, num_cmgs):
 
     Gs = G_list[0]
     Gt = G_list[1]
-    Gg = G_list[2]
+    #Gg = G_list[2]
 
     D0 = np.zeros((3, num_cmgs))
     D1 = np.zeros((3, num_cmgs))
@@ -450,40 +440,41 @@ def steering_law(t, state, Lr, I_list, w_gframe, G_list, b_w_RN, num_cmgs):
     eta_dot_control = W @ Q.T @ np.linalg.inv(Q @ W @ Q.T) @ (-Lr)
 
     # null motion portion of steering law implementation
-    ke = 0.01
-    alpha = 0.5
-    k_db = 3
-    A = np.identity(2*num_cmgs)
+    #ke = 0.01
+    #alpha = 0.5
+   # k_db = 3
+   # A = np.identity(2*num_cmgs)
     
     # Calculate condition number
-    u, s, v = np.linalg.svd(D1)
-    kappa = s[0]/s[2]
-    if kappa > 1 and kappa < k_db:
-        alpha = 0
+    #u, s, v = np.linalg.svd(D1)
+    #kappa = s[0]/s[2]
+    kappa = 0
+   # if kappa > 1 and kappa < k_db:
+       # alpha = 0
 
     # Calculate the condition number sensitivities
-    dk_dg = np.zeros((num_cmgs,1))
-    for cmg in range(num_cmgs):
-        chi = (Iws*OMEGA[cmg] + Js*w_s[cmg])*-Gs[:,cmg] + Js*w_t[cmg]*Gt[:,cmg]
+    #dk_dg = np.zeros((num_cmgs,1))
+    # for cmg in range(num_cmgs):
+    #     chi = (Iws*OMEGA[cmg] + Js*w_s[cmg])*-Gs[:,cmg] + Js*w_t[cmg]*Gt[:,cmg]
         
-        u1 = u[:,0]
-        V_ij_1 = v[0, cmg]
-        d_sig1 = u1.T @ chi *V_ij_1
+    #     u1 = u[:,0]
+    #     V_ij_1 = v[0, cmg]
+    #     d_sig1 = u1.T @ chi *V_ij_1
         
-        u3 = u[:,2]
-        V_ij_3 = v[2, cmg]
-        d_sig3 = u3.T @ chi *V_ij_3
+    #     u3 = u[:,2]
+    #     V_ij_3 = v[2, cmg]
+    #     d_sig3 = u3.T @ chi *V_ij_3
         
-        dk_dg_i = (1/s[2])*d_sig1 - (s[0]/(s[2]**2))*d_sig3
+    #     dk_dg_i = (1/s[2])*d_sig1 - (s[0]/(s[2]**2))*d_sig3
        
-        dk_dg[cmg] = dk_dg_i
+    #     dk_dg[cmg] = dk_dg_i
 
-    dk_dg.reshape((num_cmgs,1))
+    # dk_dg.reshape((num_cmgs,1))
 
-    delta_OMEGA = np.zeros((num_cmgs,1))
-    delta_gamma = -alpha*(1-kappa)*dk_dg
+    #delta_OMEGA = np.zeros((num_cmgs,1))
+    #delta_gamma = -alpha*(1-kappa)*dk_dg
 
-    delta_eta = np.concatenate((delta_OMEGA, delta_gamma), axis = 0)
+    #delta_eta = np.concatenate((delta_OMEGA, delta_gamma), axis = 0)
     
     #eta_dot_null = ke*(Q.T @ np.linalg.inv(Q @ Q.T) @ (Q) - np.identity(2*num_cmgs)) @ A @ delta_eta
 
@@ -497,7 +488,7 @@ def steering_law(t, state, Lr, I_list, w_gframe, G_list, b_w_RN, num_cmgs):
 
 def ODE(state_vector, control_vector, inertia_list, num_cmgs, G_0, gamma_0):
     # Ordinary differential equations for States for our system/spacecraft
-
+    mu_earth = 3.986004415E5
     #Extract necessary parameters for later calculation 
     I = inertia_list[0]             # total inertia
     Iws = inertia_list[3][0,0] 
@@ -506,10 +497,18 @@ def ODE(state_vector, control_vector, inertia_list, num_cmgs, G_0, gamma_0):
     Jg = inertia_list[4][2,2]
 
     # extract states
+    x = state_vector[6+3*num_cmgs]
+    y = state_vector[6+3*num_cmgs+1]
+    z = state_vector[6+3*num_cmgs+2]
+
+    vx = state_vector[6+3*num_cmgs+3]
+    vy = state_vector[6+3*num_cmgs+4]
+    vz = state_vector[6+3*num_cmgs+5]
+
     sigmaBN = state_vector[0:3]
     w = state_vector[3:6]
-    gamma = state_vector[6:6+num_cmgs]
-    gamma_dot = state_vector[6+num_cmgs:6+2*num_cmgs]
+    #gamma = state_vector[6:6+num_cmgs]
+    #gamma_dot = state_vector[6+num_cmgs:6+2*num_cmgs]
     OMEGA = state_vector[6+2*num_cmgs:6+3*num_cmgs]
 
     gamma = 0.0* np.ones((num_cmgs,1))
@@ -528,11 +527,22 @@ def ODE(state_vector, control_vector, inertia_list, num_cmgs, G_0, gamma_0):
     # Control Torques
     u = control_vector
     u_s = control_vector[0:num_cmgs]
-    u_g = control_vector[num_cmgs:]
+    #u_g = control_vector[num_cmgs:]
     u_g = 0.0* np.ones((num_cmgs,1))
 
     #External torque on the vehicle
     L = 0.0* np.ones((3,1))
+
+    # Orbit differential equations
+    xdot = vx
+    vxdot = -(mu_earth*x) / (x**2 + y**2 + z**2)**(3/2)
+    ydot = vy
+    vydot = -(mu_earth*y) / (x**2 + y**2 + z**2)**(3/2) 
+    zdot = vz
+    vzdot = -(mu_earth * z) / (x**2 + y**2 + z**2) ** (3 / 2) 
+
+    pos_dot = np.array([[xdot], [ydot], [zdot]]).reshape(3,1)
+    vel_dot = np.array([[vxdot], [vydot], [vzdot]]).reshape(3,1)
 
     # MRP Kinematic Differential Equations
     s_tilde = tilde(sigmaBN)
@@ -540,55 +550,63 @@ def ODE(state_vector, control_vector, inertia_list, num_cmgs, G_0, gamma_0):
     s_dot = 0.25*((1 - s2)*np.identity(3) + 2*s_tilde + 2*sigmaBN @ sigmaBN.T) @ w
 
     # VSCMG coupled equations of motions, build M matrix
-    row1 = np.concatenate((I, Jg*Gg, Iws*Gs), axis = 1)
-    row2 = np.concatenate((Jg*Gg.T, Jg*np.identity(num_cmgs), np.zeros((num_cmgs,num_cmgs))), axis = 1)
-    row3 = np.concatenate((Iws*Gs.T, np.zeros((num_cmgs,num_cmgs)), Iws*np.identity(num_cmgs)), axis = 1)
-    M = np.concatenate((row1, row2, row3), axis=0)
+    row1 = np.concatenate((I, Iws*Gs), axis = 1)
+    row3 = np.concatenate((Iws*Gs.T, Iws*np.identity(num_cmgs)), axis = 1)
+    M = np.concatenate((row1, row3), axis=0)
+
+    # row1 = np.concatenate((I, Jg*Gg, Iws*Gs), axis = 1)
+    # row2 = np.concatenate((Jg*Gg.T, Jg*np.identity(num_cmgs), np.zeros((num_cmgs,num_cmgs))), axis = 1)
+    # row3 = np.concatenate((Iws*Gs.T, np.zeros((num_cmgs,num_cmgs)), Iws*np.identity(num_cmgs)), axis = 1)
+    # M = np.concatenate((row1, row2, row3), axis=0)
     
     terms = np.zeros((1,3))
     for i in range(num_cmgs):
-        next_term = ((Js*gamma_dot[i]*w_t[i] - (Jt-Jg)*w_t[i]*gamma_dot[i]) * Gs[:,i] + 
-                                            (((Js*w_s[i] + Iws*OMEGA[i])*gamma_dot[i]) - (Jt+Jg)*w_s[i]*gamma_dot[i] + Iws*OMEGA[i]*w_g[i]) * Gt[:,i] -
-                                            (Iws*OMEGA[i]*w_t[i]) * Gg[:,i])
+        # next_term = ((Js*gamma_dot[i]*w_t[i] - (Jt-Jg)*w_t[i]*gamma_dot[i]) * Gs[:,i] + 
+        #                                     (((Js*w_s[i] + Iws*OMEGA[i])*gamma_dot[i]) - (Jt+Jg)*w_s[i]*gamma_dot[i] + Iws*OMEGA[i]*w_g[i]) * Gt[:,i] -
+        #                                     (Iws*OMEGA[i]*w_t[i]) * Gg[:,i])
+
+        next_term = ((Iws*OMEGA[i]*w_g[i]) * Gt[:,i] - (Iws*OMEGA[i]*w_t[i]) * Gg[:,i])
         terms = terms + next_term
         
     # w function in S&J ex 4.15
     f_w = -tilde(w) @ I @ w + L - terms.T
                                         
     # gamma_dot function in S&J ex 4.15
-    f_gamma_dot = np.array([u_g[i] + (Js-Jt)*w_s[i]*w_t[i] + Iws*OMEGA[i]*w_t[i] for i in range(num_cmgs)]).reshape(num_cmgs,1)
+    f_gamma_dot = np.array([u_g[i] + (Js-Jt)*w_s[i]*w_t[i] + Iws*OMEGA[i]*w_t[i] for i in range(num_cmgs)]).reshape(num_cmgs,1)  #
    
     # OMEGA function in S&J ex 4.15
     f_OMEGA = np.array([u_s[i] - Iws*gamma_dot[i]*w_t[i] for i in range(num_cmgs)]).reshape(num_cmgs,1)
 
     # Right hand side of expressions (S&J ex 4.15)
-    RHS = np.concatenate((f_w, f_gamma_dot, f_OMEGA), axis=0) 
+    RHS = np.concatenate((f_w, f_OMEGA), axis=0) 
+    #RHS = np.concatenate((f_w, f_gamma_dot, f_OMEGA), axis=0)
 
     # Solve matrix equation 
     solution = np.linalg.inv(M) @ RHS
     
     #extract particular elements of the solution vector for debugging
     w_dot = solution[0:3]
-    gamma_dub = solution[3:3+num_cmgs]
-    OMEGA_dot = solution[3+num_cmgs:3+2*num_cmgs]
+    #gamma_dub = solution[3:3+num_cmgs]
+    OMEGA_dot = solution[3:3+num_cmgs]
+    #OMEGA_dot = solution[3+num_cmgs:3+2*num_cmgs]
 
     # The below is used to force the CMGs into 'locked' configurations to represent CMG cases, RW cases, or Rigid body cases
     gamma_dot = np.zeros((num_cmgs,1))
     gamma_dub = np.zeros((num_cmgs,1))
     #OMEGA_dot = np.zeros((num_cmgs,1))
 
-    state_dot = np.concatenate((s_dot, w_dot, gamma_dot, gamma_dub, OMEGA_dot), axis=0)
+    state_dot = np.concatenate((s_dot, w_dot, gamma_dot, gamma_dub, OMEGA_dot, pos_dot, vel_dot), axis=0)
     return state_dot
 
 
 def integrate(time, control_reference=None):
     # Setup initial values/lists to build on
-    time_step = 0.5 # integration time step in seconds
+    time_step = 2 # integration time step in seconds
     int_time = np.linspace(0, time, (int(time/time_step))+1)
 
     # Load initial conditions and build initial lists to build on
-    attitude, rates, gamma, gamma_dot, OMEGA, gimbal_frames, num_cmgs = load_initial_conditions()
-    state = [np.concatenate((attitude[0], rates[0], gamma[0], gamma_dot[0], OMEGA[0]), axis=0)]
+    attitude, rates, gamma, gamma_dot, OMEGA, gimbal_frames, num_cmgs, position, velocity = load_initial_conditions()
+    state = [np.concatenate((attitude[0], rates[0], gamma[0], gamma_dot[0], OMEGA[0], position[0], velocity[0]), axis=0)]
     gimbal_frames_list = [gimbal_frames]
     att_err = [np.array([[0], [0], [0]])]
     rate_err = [np.array([[0], [0], [0]])]
@@ -644,6 +662,8 @@ def integrate(time, control_reference=None):
         gamma.append(new_state[6:6+num_cmgs])
         gamma_dot.append(new_state[6+num_cmgs:6+2*num_cmgs])
         OMEGA.append(new_state[6+2*num_cmgs:6+3*num_cmgs])
+        position.append(new_state[6+3*num_cmgs:6+3*num_cmgs+3])
+        velocity.append(new_state[6+3*num_cmgs+3:6+3*num_cmgs+6])
         att_err.append(sigmaBR)
         rate_err.append(wBR)
         control.append(u)
@@ -658,11 +678,13 @@ def integrate(time, control_reference=None):
     gamma.pop()
     gamma_dot.pop()
     OMEGA.pop()
+    position.pop()
+    velocity.pop()
     att_err.pop()
     rate_err.pop()
     control.pop()
    
-    return int_time, attitude, rates, gamma, gamma_dot, OMEGA, I_list, G_list, w_gframe, gimbal_frames_list, control , att_err, rate_err, kappa_list, d_singular_list
+    return int_time, attitude, rates, gamma, gamma_dot, OMEGA, I_list, G_list, w_gframe, gimbal_frames_list, control , att_err, rate_err, kappa_list, d_singular_list, position, velocity
 
 
 def plot_states(data, title):
@@ -722,7 +744,20 @@ def plot_states(data, title):
     plt.grid(True)
 
     # TODO: add plots for remaining parts of state vector
-    
+    plt.figure()
+    ax = plt.axes(projection='3d')
+    x = [float(item[0]) for item in data[15]]
+    y = [float(item[1]) for item in data[15]]
+    z = [float(item[2]) for item in data[15]]
+    ax.plot3D(x, y, z, 'blue')
+    #plt.legend(['-0.1', '0', '0.1'])
+    plt.xlabel('X position [km]')
+    plt.ylabel('Y position [km]')
+    #ax = plt.figure.gca(projection='3d')
+    ax.set_zlabel('Z position [km]')
+    # # plt.zlabel('Z position [km]')
+    ax.scatter3D(7000, 7000, 7000, c='gray')
+    ax.scatter3D(-7000, -7000, -7000, c='gray')
 
 def plot_errors(data,title):
     t = data[0]
@@ -778,16 +813,16 @@ def plot_conservation(data, title):
     #extract inertias for later calculations
     I_s = [data[6][i][1] for i in range(len(t))]
     I_gs = data[6][0][2][0,0]
-    I_gt = data[6][0][2][1,1]
-    I_gg = data[6][0][2][2,2]
+    #I_gt = data[6][0][2][1,1]
+    #I_gg = data[6][0][2][2,2]
     I_ws = data[6][0][3][0,0]
     I_wt = data[6][0][3][1,1]
     Jt = data[6][0][4][1,1]
     Jg = data[6][0][4][2,2]
 
     L = 0.0* np.ones((3,1))
-    OMEGA_dot_des = [0.1*math.cos(0.05*time)*np.ones((num_cmgs,1)) for time in t]
-    gamma_dot_des = [0.001*math.cos(0.05*time)*np.ones((num_cmgs,1)) for time in t]
+    #OMEGA_dot_des = [0.1*math.cos(0.05*time)*np.ones((num_cmgs,1)) for time in t]
+    #gamma_dot_des = [0.001*math.cos(0.05*time)*np.ones((num_cmgs,1)) for time in t]
 
     Hmag = []
     H_B_vec_b = []
@@ -800,21 +835,21 @@ def plot_conservation(data, title):
     T_dot_inputs = [np.zeros(1)]
     T_dot_diff = []
 
-    w_gframe_0_s = []
-    w_gframe_0_t = []
-    w_gframe_0_g = []
+    # w_gframe_0_s = []
+    # w_gframe_0_t = []
+    # w_gframe_0_g = []
 
-    w_gframe_1_s = []
-    w_gframe_1_t = []
-    w_gframe_1_g = []
+    # w_gframe_1_s = []
+    # w_gframe_1_t = []
+    # w_gframe_1_g = []
 
-    w_gframe_2_s = []
-    w_gframe_2_t = []
-    w_gframe_2_g = []
+    # w_gframe_2_s = []
+    # w_gframe_2_t = []
+    # w_gframe_2_g = []
 
-    w_gframe_3_s = []
-    w_gframe_3_t = []
-    w_gframe_3_g = []
+    # w_gframe_3_s = []
+    # w_gframe_3_t = []
+    # w_gframe_3_g = []
 
     w_BN = data[2]
     gamma_dot = data[4]
@@ -837,21 +872,21 @@ def plot_conservation(data, title):
         BN.append(MRP2DCM(data[1][i]))
         H_B_vec_b.append(I_s[i] @ w_BN[i])
 
-        w_gframe_0_s.append(data[8][i][0][0])
-        w_gframe_0_t.append(data[8][i][0][1])
-        w_gframe_0_g.append(data[8][i][0][2])
+        # w_gframe_0_s.append(data[8][i][0][0])
+        # w_gframe_0_t.append(data[8][i][0][1])
+        # w_gframe_0_g.append(data[8][i][0][2])
 
-        w_gframe_1_s.append(data[8][i][1][0])
-        w_gframe_1_t.append(data[8][i][1][1])
-        w_gframe_1_g.append(data[8][i][1][2])
+        # w_gframe_1_s.append(data[8][i][1][0])
+        # w_gframe_1_t.append(data[8][i][1][1])
+        # w_gframe_1_g.append(data[8][i][1][2])
 
-        w_gframe_2_s.append(data[8][i][2][0])
-        w_gframe_2_t.append(data[8][i][2][1])
-        w_gframe_2_g.append(data[8][i][2][2])
+        # w_gframe_2_s.append(data[8][i][2][0])
+        # w_gframe_2_t.append(data[8][i][2][1])
+        # w_gframe_2_g.append(data[8][i][2][2])
 
-        w_gframe_3_s.append(data[8][i][3][0])
-        w_gframe_3_t.append(data[8][i][3][1])
-        w_gframe_3_g.append(data[8][i][3][2])
+        # w_gframe_3_s.append(data[8][i][3][0])
+        # w_gframe_3_t.append(data[8][i][3][1])
+        # w_gframe_3_g.append(data[8][i][3][2])
 
     
         BG0 = data[9][i][0]
@@ -941,7 +976,7 @@ def plot_conservation(data, title):
     plt.plot(t, H_vec_x)
     plt.plot(t, H_vec_y)
     plt.plot(t, H_vec_z)
-    plt.title("Angular Momentum vector vs. Time")
+    plt.title("Inertial Angular Momentum vector vs. Time")
     plt.xlabel('Time from Epoch [sec]')
     plt.ylabel('Angular Momentum [kg-m^2/s]')
     plt.legend(['H_x', 'H_y', 'H_z'])
@@ -1350,9 +1385,9 @@ def make_animation(attitudes, errors):
 
 if __name__ == "__main__":
     # Run simulation
-    t = 1000 # Simulation length in seconds
-    int_time, attitude, rates, gamma, gamma_dot, OMEGA, I_list, G_list, w_gframe, gimbal_frames_list, control, att_err, rate_err, kappa_list, d_singular_list  = integrate(t, control_reference='None')
-    plot_states([int_time, attitude, rates, gamma, gamma_dot, OMEGA, I_list, G_list, w_gframe, gimbal_frames_list, control, att_err, rate_err, kappa_list, d_singular_list], 'Problem 5')
+    t = 6000 # Simulation length in seconds
+    int_time, attitude, rates, gamma, gamma_dot, OMEGA, I_list, G_list, w_gframe, gimbal_frames_list, control, att_err, rate_err, kappa_list, d_singular_list, position, velocity  = integrate(t, control_reference='Regulation')
+    plot_states([int_time, attitude, rates, gamma, gamma_dot, OMEGA, I_list, G_list, w_gframe, gimbal_frames_list, control, att_err, rate_err, kappa_list, d_singular_list, position, velocity], 'Problem 5')
     plot_control([int_time, attitude, rates, gamma, gamma_dot, OMEGA, I_list, G_list, w_gframe, gimbal_frames_list, control, att_err, rate_err, kappa_list, d_singular_list], 'Problem 5')
     plot_conservation([int_time, attitude, rates, gamma, gamma_dot, OMEGA, I_list, G_list, w_gframe, gimbal_frames_list, control, att_err, rate_err, kappa_list, d_singular_list], 'Problem 5')
     plot_errors([int_time, attitude, rates, gamma, gamma_dot, OMEGA, I_list, G_list, w_gframe, gimbal_frames_list, control, att_err, rate_err, kappa_list, d_singular_list], 'Problem 5')
