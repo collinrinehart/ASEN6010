@@ -206,8 +206,52 @@ def generate_reference(t):
     w_HN_dot = np.array([[0], [0], [0]]) # assumes circular orbit
     return HN, w_HN, w_HN_dot # returns stuff expressed in the N frame
 
+def object_states(time):
+    # Calculates the Inertial R and V vectors of a given spacecraft/object in orbit
+    r_earth = 6378
+    mu = 3.986004415E5  # Mu Earth [km^3/s^2]
+    
+    r_obj = r_earth + 600
+    RAAN_obj = math.radians(0)
+    i_obj = math.radians(0)
+    theta_dot_obj = math.sqrt(mu/(r_obj**3))  # [rad/s]   
+    theta_obj_t = math.radians(250) + theta_dot_obj * time
 
-def evaluate_control_reference(time, state, I_list, w_gframe, G_list, num_cmgs, control_reference=None):
+    r_orbitframe_obj = np.array([[r_obj], [0], [0]])
+    v_orbitframe_obj = np.array([[0], [math.sqrt(mu / r_obj)], [0]])
+
+    # Calculates the [NH] DCM for spacecraft/object
+
+    NH_obj = np.array([[math.cos(RAAN_obj) * math.cos(theta_obj_t) - math.sin(RAAN_obj) * math.cos(i_obj) * math.sin(theta_obj_t),
+                         -math.cos(RAAN_obj) * math.sin(theta_obj_t) - math.sin(RAAN_obj) * math.cos(i_obj) * math.cos(theta_obj_t),
+                         math.sin(RAAN_obj) * math.sin(i_obj)],
+                        [math.sin(RAAN_obj) * math.cos(theta_obj_t) + math.cos(RAAN_obj) * math.cos(i_obj) * math.sin(theta_obj_t),
+                         -math.sin(RAAN_obj) * math.sin(theta_obj_t) + math.cos(RAAN_obj) * math.cos(i_obj) * math.cos(theta_obj_t),
+                         -math.cos(RAAN_obj) * math.sin(i_obj)],
+                        [math.sin(i_obj) * math.sin(theta_obj_t), math.sin(i_obj) * math.cos(theta_obj_t), math.cos(i_obj)]])
+    
+    r_inertialframe_obj = NH_obj @ r_orbitframe_obj
+    v_inertialframe_obj = NH_obj @ v_orbitframe_obj
+
+    return r_inertialframe_obj, v_inertialframe_obj
+
+
+def groundsite(time):
+    boulder_site_lat = 40.009808 #[deg]
+    boulder_site_long = -105.244104 #[deg]
+    #boulder_site_alt = 
+    r_earth = 6378 #[km]
+    r_vec_gs = np.array([[r_earth],[0],[0]])
+
+    earth_lambda_0 = 0
+    earth_rot_rate = 7.292115E-5
+    earth_lambda = earth_lambda_0 + earth_rot_rate * time
+
+    return r_groundsite_N
+
+
+def evaluate_control_reference(time, state, w_gframe, G_list, num_cmgs, control_reference=None):
+    I_list = inertia_properties()
     I = I_list[0]
     Iws = I_list[3][0,0] 
     w_t = w_gframe[:,1]
@@ -217,12 +261,39 @@ def evaluate_control_reference(time, state, I_list, w_gframe, G_list, num_cmgs, 
     BN = MRP2DCM(sigmaBN)
     b_wBN = state[3:6]
     OMEGA = state[6:6+num_cmgs]
+
+    r_vec_N = state[6+num_cmgs:6+num_cmgs+3]
+    v_vec_N = state[6+num_cmgs+3:6+num_cmgs+6]
     
     # Control Gains
     K = 40 * 0.00555555555  # [Nm]
     P = 20 * 0.1666666666  # [Nm/s]
-    #K = .04*1.7  # [Nm]
-    #P = .4*13  # [Nm/s]
+
+
+    # Evaluate which control reference to use at the current time step
+    if control_reference == 'Full-Mission':
+        r_obj_N, v_obj_N = object_states(time)
+        r_groundsite_N = groundsite(time)
+        angle_to_obj = math.degrees(math.acos(np.dot(r_vec_N.T, r_obj_N)/(mag(r_vec_N)*mag(r_obj_N))))
+        angle_to_gs = math.degrees(math.acos(np.dot(r_vec_N.T, r_groundsite_N)/(mag(r_vec_N)*mag(r_groundsite_N))))
+
+        # Evaluate which mission mode/reference frame is desired
+        if r_vec_N[1] > 0:   # If LMO spacecraft is 'in the sun'             TODO: redefine this condition
+            control_reference = 'Sun-Track'
+        elif angle_to_obj < 20:      # If GMO spacecraft is visible by LMO spacecraft   TODO: redefine this condition
+            control_reference = 'Object-Track'
+        elif angle_to_gs < 20:      # If GMO spacecraft is visible by LMO spacecraft   TODO: redefine this condition
+            control_reference = 'Ground-Track'
+        elif condition:      # If GMO spacecraft is visible by LMO spacecraft   TODO: redefine this condition
+            control_reference = 'Science'
+        elif condition:   # if neither of these are true, point at Mars and do science     TODO: redefine this condition
+            control_reference = 'Nadir-Point'
+
+
+
+
+
+
 
     if control_reference == 'None': 
         Lr = np.zeros((3,1))
@@ -238,7 +309,7 @@ def evaluate_control_reference(time, state, I_list, w_gframe, G_list, num_cmgs, 
             RN, N_w_RN, N_w_RN_dot = generate_reference(time)
 
 
-        # Evaluate which control reference to use at the current time step
+        
         sigmaBR, b_wBR = attitude_error(time, sigmaBN, b_wBN, RN, N_w_RN)
         
         b_w_RN = BN @ N_w_RN
@@ -250,7 +321,7 @@ def evaluate_control_reference(time, state, I_list, w_gframe, G_list, num_cmgs, 
 
         Lr = -K * sigmaBR - P * b_wBR + I@(b_w_RN_dot - tilde(b_wBN) @ b_w_RN) + tilde(b_w_RN) @ I @ b_wBN - L + sum_terms.reshape((3,1))
     
-    return Lr, sigmaBR, b_wBR, b_w_RN
+    return Lr, sigmaBR, b_wBR, b_w_RN, mission_mode
 
 
 def inertia_properties():
@@ -544,20 +615,21 @@ def integrate(time, control_reference=None):
     rate_err = [np.array([[0], [0], [0]])]
     control = [np.zeros((2*num_cmgs, 1))]
     I_list = inertia_properties()
-
     Gs, Gt, Gg = g_frames_2_g_mats(gimbal_frames)
     G_list = [Gs, Gt, Gg]
-
-    w_s = [Gs[:,i].T @ state[0][3:6] for i in range(num_cmgs)]
-    w_t = [Gt[:,i].T @ state[0][3:6] for i in range(num_cmgs)]
-    w_g = [Gg[:,i].T @ state[0][3:6] for i in range(num_cmgs)]
-    w_gframe = [np.concatenate((w_s, w_t, w_g), axis=1)]    # 4x3 matrix where columns are all s components, t components, then g components
+    w_gframe = []
+    mission_mode = ['Initialization']
     
     # Perform Runge-Kutta 4th Order Integration for specified time
     for t in int_time:
         x = int(t/time_step)
 
-        Lr, sigmaBR, wBR, b_w_RN = evaluate_control_reference(t, state[x], I_list, w_gframe[x], G_list, num_cmgs, control_reference) 
+        w_s = [Gs[:,i].T @ state[x][3:6] for i in range(num_cmgs)]
+        w_t = [Gt[:,i].T @ state[x][3:6] for i in range(num_cmgs)]
+        w_g = [Gg[:,i].T @ state[x][3:6] for i in range(num_cmgs)]
+        w_gframe.append(np.concatenate((w_s, w_t, w_g), axis=1))   # 4x3 matrix where columns are all s components, t components, then g components
+
+        Lr, sigmaBR, wBR, b_w_RN, mode = evaluate_control_reference(t, state[x], w_gframe[x], G_list, num_cmgs, control_reference) 
         OMEGA_dot_des = steering_law(t, state[x], Lr, I_list, w_gframe[x], G_list, b_w_RN, num_cmgs)
 
         # Test desired OMEGA dot and gamma dots
@@ -573,12 +645,6 @@ def integrate(time, control_reference=None):
         new_state = state[x] + (time_step*1/6)*(k1 + 2*k2 + 2*k3 + k4)
         new_state[0:3] = check_for_shadow_set(new_state[0:3])
 
-
-        w_s = [Gs[:,i].T @ new_state[3:6] for i in range(num_cmgs)]
-        w_t = [Gt[:,i].T @ new_state[3:6] for i in range(num_cmgs)]
-        w_g = [Gg[:,i].T @ new_state[3:6] for i in range(num_cmgs)]
-        w_gframe.append(np.concatenate((w_s, w_t, w_g), axis=1))
-
         # Save results from current time step
         state.append(new_state)
         attitude.append(new_state[0:3])
@@ -589,6 +655,7 @@ def integrate(time, control_reference=None):
         att_err.append(sigmaBR)
         rate_err.append(wBR)
         control.append(u)
+        mission_mode.append(mode)
 
 
     # Remove last data point from each list so that there are the same number of elements as time
@@ -601,8 +668,9 @@ def integrate(time, control_reference=None):
     att_err.pop()
     rate_err.pop()
     control.pop()
+    mission_mode.pop()
    
-    return int_time, attitude, rates, OMEGA, w_gframe, control, att_err, rate_err, position, velocity
+    return int_time, attitude, rates, OMEGA, w_gframe, control, att_err, rate_err, position, velocity, mission_mode
 
 
 def plot_states(time, attitude, rates, OMEGA, position, title):
@@ -1250,21 +1318,21 @@ def make_animation(attitudes, errors):
 if __name__ == "__main__":
     # Run simulation
     t = 1000 # Simulation length in seconds
-    int_time, attitude, rates, OMEGA, w_gframe, control, att_err, rate_err, position, velocity  = integrate(t, control_reference='Regulation')
-    I_list = inertia_properties()
-    gimbal_frames = load_spacecraft_configuration()
-    Gs, Gt, Gg = g_frames_2_g_mats(gimbal_frames)
-    G_list = [Gs, Gt, Gg]
+    int_time, attitude, rates, OMEGA, w_gframe, control, att_err, rate_err, position, velocity, mission_mode  = integrate(t, control_reference='Regulation')
+    #I_list = inertia_properties()
+    #gimbal_frames = load_spacecraft_configuration()
+    #Gs, Gt, Gg = g_frames_2_g_mats(gimbal_frames)
+    #G_list = [Gs, Gt, Gg]
 
     plot_states(int_time, attitude, rates, OMEGA, position, 'Project')
     plot_control(int_time, control, 'Project')
     plot_conservation(int_time, attitude, rates, OMEGA, control, 'Project')
     plot_errors(int_time, att_err, rate_err, 'Project')
     #plot_checks([int_time, attitude, rates, OMEGA, G_list, w_gframe, control, att_err, rate_err], 'Project')
-    args = {'show'         : True}
-    print(position[0].reshape(1,3))
-    pos_row  = np.vstack((position[0].reshape(1,3), position[1].reshape(1,3)))
-    print(pos_row[:,1])
+    # args = {'show'         : True}
+    # print(position[0].reshape(1,3))
+    # pos_row  = np.vstack((position[0].reshape(1,3), position[1].reshape(1,3)))
+    # print(pos_row[:,1])
     #plot_orbits([position[0].reshape(1,3),position[1].reshape(1,3)], args)
     
     # Post process data for animations
