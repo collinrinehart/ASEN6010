@@ -17,6 +17,7 @@ COLORS = [
 	'm', 'deeppink', 'chartreuse', 'w', 'springgreen', 'peachpuff',
 	'white', 'lightpink', 'royalblue', 'lime', 'aqua' ] * 100
 
+
 def tilde(vec):
     #  Uses Numpy array column vectors to define a tilde matrix
     #  Returns a 3x3 NumPy array
@@ -176,14 +177,89 @@ def mrp_subtraction(MRP3, MRP1):
     return MRP2
 
 
-def attitude_error(t, sigma_BN, b_w_BN, RN, N_wRN):
+# def attitude_error(t, sigma_BN, b_w_BN, RN, N_wRN):
+#     # Calculates the attitude error and rate error based on current states and current reference
+#     # Returns 3x1 numpy array sigma_BR and 3x1 numpy array b_wBR
+#     BN = MRP2DCM(sigma_BN)
+#     BR = BN @ RN.T
+#     sigma_BR = DCM2MRP(BR).reshape(3,1)  # calculates the attitude error
+#     b_wBR = b_w_BN - BN @ N_wRN          # calculates rate error in body frame
+#     return sigma_BR, b_wBR
+
+
+def attitude_error(t, sigma_BN, b_w_BN, r_vec_N, v_vec_N, RN_funct, wRN_funct):
     # Calculates the attitude error and rate error based on current states and current reference
-    # Returns 3x1 numpy array sigma_BR and 3x1 numpy array b_wBR
+    dt = timestep()
     BN = MRP2DCM(sigma_BN)
-    BR = BN @ RN.T
-    sigma_BR = DCM2MRP(BR).reshape(3,1)  # calculates the attitude error
-    b_wBR = b_w_BN - BN @ N_wRN          # calculates rate error in body frame
-    return sigma_BR, b_wBR
+    BR = BN @ RN_funct(t, r_vec_N, v_vec_N).T
+    N_wRN = wRN_funct(t, r_vec_N, v_vec_N)
+    sigma_BR = DCM2MRP(BR)  # calculates the attitude error
+    b_w_RN = BN @ N_wRN
+    b_wBR = b_w_BN - b_w_RN  # calculates rate error in body frame
+    if t == 0:
+        b_w_RN_dot = np.zeros((3,1))
+    else:
+        b_w_RN_dot = (wRN_funct(t, r_vec_N, v_vec_N)-wRN_funct(t-dt, r_vec_N, v_vec_N))/(dt)
+    
+    return sigma_BR, b_wBR, b_w_RN, b_w_RN_dot
+
+
+def Rs_N(t, r_vec_N = None, v_vec_N = None):
+    # Calculates the 'Inertial-to-Sun-Pointing Frame' DCM
+    # Defined as the body [0.707, 0.707, 0] body vector pointed at sun
+    # +Z body vector aligned with inertial +Z
+    angle = math.radians(45)
+    RsN = np.array([[ math.cos(angle), math.sin(angle), 0], 
+                    [-math.sin(angle), math.cos(angle), 0], 
+                    [               0,               0, 1]])
+    return RsN
+
+
+def RsN_rate(t, r_vec_N = None):
+    # Returns the Rotation rate vector for the Sun-pointing frame in the inertial frame
+    # Sun-pointing frame defined as an inertial frame for this project
+    w_RsN = np.array([[0], [0], [0]])
+    return w_RsN
+
+
+def H_N(r_vec_N, v_vec_N):
+    h_vec_N = np.cross(r_vec_N, v_vec_N)
+    r_unit_N = r_vec_N/np.linalg.norm(r_vec_N)
+    v_unit_N = v_vec_N/np.linalg.norm(v_vec_N)
+    h_unit_N = h_vec_N/np.linalg.norm(h_vec_N)
+
+    r_unit_N.reshape((3,1))
+    v_unit_N.reshape((3,1))
+    h_unit_N.reshape((3,1))
+
+    NH = np.concatenate((r_unit_N, v_unit_N, h_unit_N), axis = 1)
+    HN = NH.T
+    return HN
+
+
+def Rn_N(t, r_vec_N = None, v_vec_N = None):
+    # Calculates the 'Inertial-to-Nadir pointing Frame' DCM
+    # Defined as the body [0, 0, -1] body vector pointed nadir
+    # body [0, 1, 0] pointed in velocity direction
+
+    HN = H_N(r_vec_N, v_vec_N)
+
+    angle = math.radians(90)
+    Rot = np.array([[math.cos(angle), 0, -math.sin(angle)], 
+                    [              0, 1,                0]
+                    [math.sin(angle), 0,  math.cos(angle)]])
+    
+    RnN = Rot @ HN
+    return RnN
+
+def RnN_rate(t, r_vec_N = None, v_vec_N = None):
+    # Returns the Rotation rate vector for the nadir-pointing frame in the inertial frame
+    mu = 3.986004415E5  # Mu Earth [km^3/s^2]
+    theta_dot = math.sqrt(mu/(mag(r_vec_N)**3))  # [rad/s] 
+    w_Rn_H = np.array([[0], [0], [theta_dot]])
+    HN = H_N(r_vec_N, v_vec_N)
+    w_Rn_N = HN.T @ w_Rn_H
+    return w_Rn_N
 
 
 def generate_reference(t):
@@ -206,12 +282,13 @@ def generate_reference(t):
     w_HN_dot = np.array([[0], [0], [0]]) # assumes circular orbit
     return HN, w_HN, w_HN_dot # returns stuff expressed in the N frame
 
+
 def object_states(time):
     # Calculates the Inertial R and V vectors of a given spacecraft/object in orbit
     r_earth = 6378
     mu = 3.986004415E5  # Mu Earth [km^3/s^2]
-    
-    r_obj = r_earth + 600
+    obj_alt = 600
+    r_obj = r_earth + obj_alt
     RAAN_obj = math.radians(0)
     i_obj = math.radians(0)
     theta_dot_obj = math.sqrt(mu/(r_obj**3))  # [rad/s]   
@@ -237,26 +314,45 @@ def object_states(time):
 
 
 def groundsite(time):
-    boulder_site_lat = 40.009808 #[deg]
-    boulder_site_long = -105.244104 #[deg]
-    #boulder_site_alt = 
+    boulder_site_lat = 40.009808 * math.pi/180      #[rads]
+    boulder_site_long = -105.244104 * math.pi/180   #[rads]
+    
     r_earth = 6378 #[km]
     r_vec_gs = np.array([[r_earth],[0],[0]])
+    v_unit_gs = np.array([[0],[1],[0]])
 
-    earth_lambda_0 = 0
-    earth_rot_rate = 7.292115E-5
+    rot_long = np.array([[math.cos(boulder_site_long),  math.sin(boulder_site_long), 0],
+                          [-math.sin(boulder_site_long), math.cos(boulder_site_long), 0],
+                          [0,                            0,                          1]])
+
+    rot_lat = np.array([[math.cos(boulder_site_lat), 0, -math.sin(boulder_site_lat)],
+                        [0,                          1,                           0],
+                        [math.sin(boulder_site_lat), 0, math.cos(boulder_site_lat)]])
+
+    r_vec_gs_ECF = rot_lat @ rot_long @ r_vec_gs
+    v_unit_gs_ECF = rot_lat @ rot_long @ v_unit_gs
+
+    earth_lambda_0 = 0 # [rads]
+    earth_rot_rate = 7.292115E-5    #[rad/s]
     earth_lambda = earth_lambda_0 + earth_rot_rate * time
 
-    return r_groundsite_N
+    rot_lambda = np.array([[math.cos(earth_lambda), math.sin(earth_lambda), 0],
+                          [-math.sin(earth_lambda), math.cos(earth_lambda), 0],
+                          [0,                    0,                         1]])
+
+    r_groundsite_N = rot_lambda @ r_vec_gs_ECF
+    v_groundsite_N = r_earth*math.cos(boulder_site_lat)*(rot_lambda @ v_unit_gs_ECF)
+
+    return r_groundsite_N, v_groundsite_N
 
 
-def evaluate_control_reference(time, state, w_gframe, G_list, num_cmgs, control_reference=None):
+def evaluate_control_reference(time, state, w_gframe, G_list, num_cmgs, mode, control_reference=None):
     I_list = inertia_properties()
     I = I_list[0]
     Iws = I_list[3][0,0] 
     w_t = w_gframe[:,1]
     w_g = w_gframe[:,2]
-    L = 0.0* np.ones((3,1))
+    ext_torque = 0.0* np.ones((3,1))
     sigmaBN = state[0:3]
     BN = MRP2DCM(sigmaBN)
     b_wBN = state[3:6]
@@ -269,6 +365,11 @@ def evaluate_control_reference(time, state, w_gframe, G_list, num_cmgs, control_
     K = 40 * 0.00555555555  # [Nm]
     P = 20 * 0.1666666666  # [Nm/s]
 
+    # Calculate gryoscopic feed forward terms for later use
+    gyro_terms = np.array([[0, 0, 0]])
+    for cmg in range(num_cmgs):
+        gyro_terms = gyro_terms +  (Iws*OMEGA[cmg]*w_g[cmg]*G_list[1][:,cmg] + Iws*OMEGA[cmg]*w_t[cmg]*G_list[2][:,cmg]).T
+    gyro_terms.reshape((3,1))
 
     # Evaluate which control reference to use at the current time step
     if control_reference == 'Full-Mission':
@@ -277,22 +378,25 @@ def evaluate_control_reference(time, state, w_gframe, G_list, num_cmgs, control_
         angle_to_obj = math.degrees(math.acos(np.dot(r_vec_N.T, r_obj_N)/(mag(r_vec_N)*mag(r_obj_N))))
         angle_to_gs = math.degrees(math.acos(np.dot(r_vec_N.T, r_groundsite_N)/(mag(r_vec_N)*mag(r_groundsite_N))))
 
-        # Evaluate which mission mode/reference frame is desired
-        if r_vec_N[1] > 0:   # If LMO spacecraft is 'in the sun'             TODO: redefine this condition
-            control_reference = 'Sun-Track'
-        elif angle_to_obj < 20:      # If GMO spacecraft is visible by LMO spacecraft   TODO: redefine this condition
-            control_reference = 'Object-Track'
-        elif angle_to_gs < 20:      # If GMO spacecraft is visible by LMO spacecraft   TODO: redefine this condition
-            control_reference = 'Ground-Track'
-        elif condition:      # If GMO spacecraft is visible by LMO spacecraft   TODO: redefine this condition
-            control_reference = 'Science'
-        elif condition:   # if neither of these are true, point at Mars and do science     TODO: redefine this condition
-            control_reference = 'Nadir-Point'
-
-
-
-
-
+        if mode == 'Initialization' or 'De-tumble':
+            mission_mode = 'De-tumble'
+            control_reference = mission_mode
+            if mag(b_wBN) < 0.0001:
+                mission_mode = 'Inertial-Hold'
+        else:
+            # Evaluate which mission mode/reference frame is desired
+            if angle_to_gs < 20:      # If GMO spacecraft is visible by LMO spacecraft   TODO: redefine this condition
+                control_reference = 'Ground-Track'
+            elif angle_to_obj < 20:      # If GMO spacecraft is visible by LMO spacecraft   TODO: redefine this condition
+                control_reference = 'Object-Track'
+            elif r_vec_N[1] > -2793:   # If LMO spacecraft is 'in the sun'. Sun is defined as in the +Y inertial direciton.
+                control_reference = 'Sun-Track'
+            else:   # if neither of these are true, point at Mars and do science     TODO: redefine this condition
+                control_reference = 'Nadir-Point'
+            
+        # elif condition:      # If GMO spacecraft is visible by LMO spacecraft   TODO: redefine this condition
+                #control_reference = 'Science'
+            
 
 
     if control_reference == 'None': 
@@ -300,26 +404,59 @@ def evaluate_control_reference(time, state, w_gframe, G_list, num_cmgs, control_
         sigmaBR = np.zeros((3,1))
         b_wBR = np.zeros((3,1))
         b_w_RN = np.zeros((3,1))
+        mission_mode = "Idle"
+
+    elif control_reference == 'Regulation':
+        sigmaBR = sigmaBN
+        b_wBR = b_wBN
+        b_w_RN = np.zeros((3,1))
+        b_w_RN_dot = np.zeros((3,1))
+        mission_mode = control_reference
+
+    elif control_reference == 'Ground-Track':
+        # RN = np.identity(3)
+        # N_w_RN = np.zeros((3,1))
+        # N_w_RN_dot = np.zeros((3,1))
+        mission_mode = control_reference
+
+    elif control_reference == 'Object-Track':
+        # RN = np.identity(3)
+        # N_w_RN = np.zeros((3,1))
+        # N_w_RN_dot = np.zeros((3,1))
+        mission_mode = control_reference
+
+    elif control_reference == 'Sun-Track':
+        sigmaBR, b_wBR, b_w_RN, b_w_RN_dot = attitude_error(time, sigmaBN, b_wBN, r_vec_N, v_vec_N, Rs_N, RsN_rate)
+        mission_mode = control_reference
+
+    elif control_reference == 'Nadir-Point':
+        sigmaBR, b_wBR, b_w_RN, b_w_RN_dot = attitude_error(time, sigmaBN, b_wBN, r_vec_N, v_vec_N, Rn_N, RnN_rate)
+        mission_mode = control_reference
+
+    elif control_reference == 'De-tumble':
+        sigmaBR = np.zeros((3,1))
+        b_wBR = b_wBN
+        b_w_RN = np.zeros((3,1))
+        b_w_RN_dot = np.zeros((3,1))
+        mission_mode = control_reference
+
+    elif control_reference == 'Inertial-Hold':
+        sigmaBR = np.zeros((3,1))
+        b_wBR = b_wBN
+        b_w_RN = np.zeros((3,1))
+        b_w_RN_dot = np.zeros((3,1))
+        mission_mode = control_reference
+
     else:
-        if control_reference == 'Regulation':
-            RN = np.identity(3)
-            N_w_RN = np.zeros((3,1))
-            N_w_RN_dot = np.zeros((3,1))
-        else:
-            RN, N_w_RN, N_w_RN_dot = generate_reference(time)
+        mission_mode = control_reference
+        #RN, N_w_RN, N_w_RN_dot = generate_reference(time)
 
 
-        
-        sigmaBR, b_wBR = attitude_error(time, sigmaBN, b_wBN, RN, N_w_RN)
-        
-        b_w_RN = BN @ N_w_RN
-        b_w_RN_dot = BN @ N_w_RN_dot
+    #sigmaBR, b_wBR = attitude_error(time, sigmaBN, b_wBN, RN, N_w_RN)
+    #b_w_RN = BN @ N_w_RN
+    # b_w_RN_dot = BN @ N_w_RN_dot
 
-        sum_terms = np.array([[0, 0, 0]])
-        for cmg in range(num_cmgs):
-            sum_terms = sum_terms +  (Iws*OMEGA[cmg]*w_g[cmg]*G_list[1][:,cmg] + Iws*OMEGA[cmg]*w_t[cmg]*G_list[2][:,cmg]).T
-
-        Lr = -K * sigmaBR - P * b_wBR + I@(b_w_RN_dot - tilde(b_wBN) @ b_w_RN) + tilde(b_w_RN) @ I @ b_wBN - L + sum_terms.reshape((3,1))
+    Lr = -K * sigmaBR - P * b_wBR + I@(b_w_RN_dot - tilde(b_wBN) @ b_w_RN) + tilde(b_w_RN) @ I @ b_wBN - ext_torque + gyro_terms
     
     return Lr, sigmaBR, b_wBR, b_w_RN, mission_mode
 
@@ -603,9 +740,13 @@ def ODE(state_vector, control_vector, inertia_list, num_cmgs, G_0):
     return state_dot
 
 
+def timestep():
+    return 0.5
+
+
 def integrate(time, control_reference=None):
     # Setup initial values/lists to build on
-    time_step = 0.5 # integration time step in seconds
+    time_step = timestep() # integration time step in seconds
     int_time = np.linspace(0, time, (int(time/time_step))+1)
 
     # Load initial conditions and build initial lists to build on
@@ -629,7 +770,7 @@ def integrate(time, control_reference=None):
         w_g = [Gg[:,i].T @ state[x][3:6] for i in range(num_cmgs)]
         w_gframe.append(np.concatenate((w_s, w_t, w_g), axis=1))   # 4x3 matrix where columns are all s components, t components, then g components
 
-        Lr, sigmaBR, wBR, b_w_RN, mode = evaluate_control_reference(t, state[x], w_gframe[x], G_list, num_cmgs, control_reference) 
+        Lr, sigmaBR, wBR, b_w_RN, mode = evaluate_control_reference(t, state[x], w_gframe[x], G_list, num_cmgs, mission_mode, control_reference) 
         OMEGA_dot_des = steering_law(t, state[x], Lr, I_list, w_gframe[x], G_list, b_w_RN, num_cmgs)
 
         # Test desired OMEGA dot and gamma dots
