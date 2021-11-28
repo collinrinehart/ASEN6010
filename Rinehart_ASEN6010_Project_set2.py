@@ -204,6 +204,136 @@ def attitude_error(t, sigma_BN, b_w_BN, r_vec_N, v_vec_N, RN_funct, wRN_funct):
     return sigma_BR, b_wBR, b_w_RN, b_w_RN_dot
 
 
+def spotlight_reference(t, r_vec_N, v_vec_N):
+    body_pointing_vec = np.array([[0],[0],[1]]) # point S/C +Z at target ground station ('no' error)
+    body_clocking_vec = np.array([[0],[1],[0]]) # point S/C +Y at the inertial clocking vector (point error accumulates here)
+    body_3rd_vec = np.cross(body_pointing_vec, body_clocking_vec)
+    body_1st_vec = body_pointing_vec
+    body_2nd_vec = np.cross(body_3rd_vec, body_1st_vec)
+
+    RM = np.concatenate((body_1st_vec, body_2nd_vec, body_3rd_vec), axis = 1)   #M is the 'intermediate' reference frame
+
+    r_groundsite_N, v_groundsite_N = groundsite(t)
+    delta_r = r_groundsite_N - r_vec_N      # Vector pointing from S/C to groundsite in inertial frame
+    delta_r_unit = delta_r/(mag(delta_r))   # normalized vector
+
+    inertial_pointing_vec = delta_r_unit    # inertial pointing direction ('no' error)
+    inertial_clocking_vec = v_vec_N/mag(v_vec_N)    # inertial clocking target (velocity direciton) (error accumulates here)
+    M_3rd_vec = np.cross(inertial_pointing_vec, inertial_clocking_vec)
+    M_1st_vec = inertial_pointing_vec
+    M_2nd_vec = np.cross(M_3rd_vec, M_1st_vec)
+
+    MN = np.concatenate((M_1st_vec, M_2nd_vec, M_3rd_vec), axis = 1)   #M is the 'intermediate' reference frame
+    RN = RM @ MN # full defines the pointing reference frame
+    return RN
+
+
+def obj_track_reference(t, r_vec_N, v_vec_N):
+    body_pointing_vec = np.array([[0],[0],[1]]) # point S/C +Z at target ground station ('no' error)
+    body_clocking_vec = np.array([[0],[1],[0]]) # point S/C +Y at the inertial clocking vector (point error accumulates here)
+    body_3rd_vec = np.cross(body_pointing_vec, body_clocking_vec)
+    body_1st_vec = body_pointing_vec
+    body_2nd_vec = np.cross(body_3rd_vec, body_1st_vec)
+
+    RM = np.concatenate((body_1st_vec, body_2nd_vec, body_3rd_vec), axis = 1)   #M is the 'intermediate' reference frame
+
+    r_obj_N, v_obj_N = object_states(t)
+    delta_r = r_obj_N - r_vec_N      # Vector pointing from S/C to groundsite in inertial frame
+    delta_r_unit = delta_r/(mag(delta_r))   # normalized vector
+
+    inertial_pointing_vec = delta_r_unit    # inertial pointing direction ('no' error)
+    inertial_clocking_vec = v_vec_N/mag(v_vec_N)    # inertial clocking target (velocity direciton) (error accumulates here)
+    M_3rd_vec = np.cross(inertial_pointing_vec, inertial_clocking_vec)
+    M_1st_vec = inertial_pointing_vec
+    M_2nd_vec = np.cross(M_3rd_vec, M_1st_vec)
+
+    MN = np.concatenate((M_1st_vec, M_2nd_vec, M_3rd_vec), axis = 1)   #M is the 'intermediate' reference frame
+    RN = RM @ MN # full defines the pointing reference frame
+    return RN
+
+
+def attitude_error_spotlight(t, sigma_BN, b_w_BN, r_vec_N_list, v_vec_N_list):
+    # Calculates the attitude error and rate error based on current states and current reference
+    
+    RN = spotlight_reference(t, r_vec_N_list[-1], v_vec_N_list[-1])
+    if len(r_vec_N_list) == 2:
+        RN_m1 = spotlight_reference(t, r_vec_N_list[-2], v_vec_N_list[-2])
+        RN_m2 = RN_m1
+    elif len(r_vec_N_list) == 1:
+        RN_m1 = RN
+        RN_m2 = RN
+    else:
+        RN_m1 = spotlight_reference(t, r_vec_N_list[-2], v_vec_N_list[-2])
+        RN_m2 = spotlight_reference(t, r_vec_N_list[-3], v_vec_N_list[-3])
+
+     # Calculates the rotation rate of the GMO-pointing reference frame in inertial frame components
+    dC = (RN - RN_m1)
+    w_tilde = -dC * RN.T
+    R_w_RcN = np.matrix([[-w_tilde[1, 2]], [w_tilde[0, 2]], [-w_tilde[0, 1]]])
+    N_wRN =  RN.T*R_w_RcN
+
+    dC2 = (RN_m1 - RN_m2)
+    w_tilde2 = -dC2 * RN_m1.T
+    R_w_RcN_m1 = np.matrix([[-w_tilde2[1, 2]], [w_tilde2[0, 2]], [-w_tilde2[0, 1]]])
+    N_wRN_m1 =  RN_m1.T*R_w_RcN_m1
+
+
+    dt = timestep()
+    BN = MRP2DCM(sigma_BN)
+    BR = BN @ RN.T
+    #N_wRN = wRN_funct(t, r_vec_N, v_vec_N)
+    sigma_BR = DCM2MRP(BR)  # calculates the attitude error
+    b_w_RN = BN @ N_wRN
+    b_wBR = b_w_BN - b_w_RN  # calculates rate error in body frame
+    #if t == 0:
+     #   b_w_RN_dot = np.zeros((3,1))
+    #else:
+    b_w_RN_dot = BN @ ((N_wRN-N_wRN_m1)/(dt))
+    
+    return sigma_BR, b_wBR, b_w_RN, b_w_RN_dot
+
+
+def attitude_error_obj_track(t, sigma_BN, b_w_BN, r_vec_N_list, v_vec_N_list):
+    # Calculates the attitude error and rate error based on current states and current reference
+    
+    RN = obj_track_reference(t, r_vec_N_list[-1], v_vec_N_list[-1])
+    if len(r_vec_N_list) == 2:
+        RN_m1 = obj_track_reference(t, r_vec_N_list[-2], v_vec_N_list[-2])
+        RN_m2 = RN_m1
+    elif len(r_vec_N_list) == 1:
+        RN_m1 = RN
+        RN_m2 = RN
+    else:
+        RN_m1 = obj_track_reference(t, r_vec_N_list[-2], v_vec_N_list[-2])
+        RN_m2 = obj_track_reference(t, r_vec_N_list[-3], v_vec_N_list[-3])
+
+     # Calculates the rotation rate of the GMO-pointing reference frame in inertial frame components
+    dC = (RN - RN_m1)
+    w_tilde = -dC * RN.T
+    R_w_RcN = np.matrix([[-w_tilde[1, 2]], [w_tilde[0, 2]], [-w_tilde[0, 1]]])
+    N_wRN =  RN.T*R_w_RcN
+
+    dC2 = (RN_m1 - RN_m2)
+    w_tilde2 = -dC2 * RN_m1.T
+    R_w_RcN_m1 = np.matrix([[-w_tilde2[1, 2]], [w_tilde2[0, 2]], [-w_tilde2[0, 1]]])
+    N_wRN_m1 =  RN_m1.T*R_w_RcN_m1
+
+
+    dt = timestep()
+    BN = MRP2DCM(sigma_BN)
+    BR = BN @ RN.T
+    #N_wRN = wRN_funct(t, r_vec_N, v_vec_N)
+    sigma_BR = DCM2MRP(BR)  # calculates the attitude error
+    b_w_RN = BN @ N_wRN
+    b_wBR = b_w_BN - b_w_RN  # calculates rate error in body frame
+    #if t == 0:
+     #   b_w_RN_dot = np.zeros((3,1))
+    #else:
+    b_w_RN_dot = BN @ ((N_wRN-N_wRN_m1)/(dt))
+    
+    return sigma_BR, b_wBR, b_w_RN, b_w_RN_dot
+
+
 def Rs_N(t, r_vec_N = None, v_vec_N = None):
     # Calculates the 'Inertial-to-Sun-Pointing Frame' DCM
     # Defined as the body [0.707, 0.707, 0] body vector pointed at sun
@@ -251,6 +381,7 @@ def Rn_N(t, r_vec_N = None, v_vec_N = None):
     
     RnN = Rot @ HN
     return RnN
+
 
 def RnN_rate(t, r_vec_N = None, v_vec_N = None):
     # Returns the Rotation rate vector for the nadir-pointing frame in the inertial frame
@@ -346,7 +477,7 @@ def groundsite(time):
     return r_groundsite_N, v_groundsite_N
 
 
-def evaluate_control_reference(time, state, w_gframe, G_list, num_cmgs, mode, control_reference=None):
+def evaluate_control_reference(time, state, w_gframe, G_list, num_cmgs, mode, r_vec_N_list, v_vec_N_list, control_reference=None):
     I_list = inertia_properties()
     I = I_list[0]
     Iws = I_list[3][0,0] 
@@ -413,16 +544,12 @@ def evaluate_control_reference(time, state, w_gframe, G_list, num_cmgs, mode, co
         b_w_RN_dot = np.zeros((3,1))
         mission_mode = control_reference
 
-    elif control_reference == 'Ground-Track':
-        # RN = np.identity(3)
-        # N_w_RN = np.zeros((3,1))
-        # N_w_RN_dot = np.zeros((3,1))
+    elif control_reference == 'Spotlight':
+        sigmaBR, b_wBR, b_w_RN, b_w_RN_dot = attitude_error_spotlight(time, sigmaBN, b_wBN, r_vec_N_list, v_vec_N_list)
         mission_mode = control_reference
 
     elif control_reference == 'Object-Track':
-        # RN = np.identity(3)
-        # N_w_RN = np.zeros((3,1))
-        # N_w_RN_dot = np.zeros((3,1))
+        sigmaBR, b_wBR, b_w_RN, b_w_RN_dot = attitude_error_obj_track(time, sigmaBN, b_wBN, r_vec_N, v_vec_N)
         mission_mode = control_reference
 
     elif control_reference == 'Sun-Track':
@@ -770,7 +897,9 @@ def integrate(time, control_reference=None):
         w_g = [Gg[:,i].T @ state[x][3:6] for i in range(num_cmgs)]
         w_gframe.append(np.concatenate((w_s, w_t, w_g), axis=1))   # 4x3 matrix where columns are all s components, t components, then g components
 
-        Lr, sigmaBR, wBR, b_w_RN, mode = evaluate_control_reference(t, state[x], w_gframe[x], G_list, num_cmgs, mission_mode, control_reference) 
+        r_vec_N_list = [item[-6:-3] for item in state[-3:]]
+        v_vec_N_list = [item[-3:] for item in state[-3:]]
+        Lr, sigmaBR, wBR, b_w_RN, mode = evaluate_control_reference(t, state[x], w_gframe[x], G_list, num_cmgs, mission_mode, r_vec_N_list, v_vec_N_list, control_reference) 
         OMEGA_dot_des = steering_law(t, state[x], Lr, I_list, w_gframe[x], G_list, b_w_RN, num_cmgs)
 
         # Test desired OMEGA dot and gamma dots
