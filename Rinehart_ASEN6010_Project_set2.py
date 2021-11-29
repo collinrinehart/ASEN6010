@@ -474,15 +474,16 @@ def groundsite(time):
     return r_groundsite_N, v_groundsite_N
 
 
-def evaluate_control_reference(time, state, w_gframe, G_list, num_cmgs, mode, r_vec_N_list, v_vec_N_list, control_reference=None):
+def evaluate_control_reference(time, state, w_gframe, G_list, num_cmgs, mode, r_vec_N_list, v_vec_N_list, L_h_dump, control_reference=None):
     I_list = inertia_properties()
     I = I_list[0]
     Iws = I_list[3][0,0] 
     w_t = w_gframe[:,1]
     w_g = w_gframe[:,2]
-    ext_torque = 0.0* np.ones((3,1))
+    ext_torque_drag = 0.0* np.ones((3,1))
+    ext_torque = ext_torque_drag + L_h_dump
     sigmaBN = state[0:3]
-    BN = MRP2DCM(sigmaBN)
+    #BN = MRP2DCM(sigmaBN)
     b_wBN = state[3:6]
     OMEGA = state[6:6+num_cmgs]
 
@@ -504,7 +505,7 @@ def evaluate_control_reference(time, state, w_gframe, G_list, num_cmgs, mode, r_
         r_groundsite_N, v_groundsite_N = groundsite(time)
         angle_to_obj = math.degrees(math.acos(np.dot(r_vec_N.T, r_obj_N)/(mag(r_vec_N)*mag(r_obj_N))))
         angle_to_gs = math.degrees(math.acos(np.dot(r_vec_N.T, r_groundsite_N)/(mag(r_vec_N)*mag(r_groundsite_N))))
-        print(mode)
+        
         if mode == 'Initialization' or  mode == 'De-tumble':
             mission_mode = 'De-tumble'
             control_reference = mission_mode
@@ -777,7 +778,7 @@ def steering_law(t, state, Lr, I_list, w_gframe, G_list, b_w_RN, num_cmgs):
     return OMEGA_dot_des
 
 
-def ODE(state_vector, control_vector, inertia_list, num_cmgs, G_0):
+def ODE(state_vector, control_vector, inertia_list, num_cmgs, G_0, L_h_dump,):
     # Ordinary differential equations for States for our system/spacecraft
     mu_earth = 3.986004415E5
     #Extract necessary parameters for later calculation 
@@ -809,7 +810,8 @@ def ODE(state_vector, control_vector, inertia_list, num_cmgs, G_0):
     u_s = control_vector[0:num_cmgs]
 
     #External torque on the vehicle
-    L = 0.0* np.ones((3,1))
+    L_ext = 0.0* np.ones((3,1))
+    L = L_ext + L_h_dump
 
     # Orbit differential equations
     xdot = vx
@@ -874,6 +876,50 @@ def timestep():
     return 0.5
 
 
+def calc_ang_mom_b(state_vector):
+    #extract inertias for later calculations
+    num_cmgs = 4
+    I_list = inertia_properties()
+    I_s = I_list[1]
+    I_ws = I_list[3][0,0]
+    I_wt = I_list[3][1,1]
+   
+    w_BN = state_vector[3:6]
+    OMEGA = state_vector[6:6+num_cmgs]
+ 
+    H_B_vec_b = I_s @ w_BN
+
+    gimbal_frames = load_spacecraft_configuration()
+    Gs, Gt, Gg = g_frames_2_g_mats(gimbal_frames)
+
+    w_s = [Gs[:,j].T @ w_BN for j in range(num_cmgs)]
+    w_t = [Gt[:,j].T @ w_BN for j in range(num_cmgs)]
+    w_g = [Gg[:,j].T @ w_BN for j in range(num_cmgs)]
+
+    # Loop to calculate gimbal angular momentum, wheel angular momentum, and system kinetic energy for each CMG
+    H_W_vec_b = np.zeros((3,1))
+    
+    for cmg in range(num_cmgs):                                            
+        H_W_vec_b = H_W_vec_b + (np.asarray(
+                                                    (I_ws*(w_s[cmg] + OMEGA[cmg])*Gs[:,cmg]) 
+                                                    + (I_wt*w_t[cmg]*Gt[:,cmg]) 
+                                                    + (I_wt*(w_g[cmg])*Gg[:,cmg])).reshape(3,1)) 
+    ang_mom_b = H_B_vec_b + H_W_vec_b
+    ang_mom_b.reshape((3,1))
+    return ang_mom_b
+
+
+def momentum_dump(ang_mom_b):
+    V = 0.005   # momentum controller gain
+    threshold = 0.0
+    if mag(ang_mom_b) > threshold:
+        L_h_dump = -V * ang_mom_b
+    else:
+        L_h_dump = np.array([[0], [0], [0]])
+
+    return L_h_dump
+
+
 def integrate(time, control_reference=None):
     # Setup initial values/lists to build on
     time_step = timestep() # integration time step in seconds
@@ -889,6 +935,7 @@ def integrate(time, control_reference=None):
     Gs, Gt, Gg = g_frames_2_g_mats(gimbal_frames)
     G_list = [Gs, Gt, Gg]
     w_gframe = []
+    ang_mom_b = [calc_ang_mom_b(state[0])]
     mission_mode = ['Initialization']
     
     # Perform Runge-Kutta 4th Order Integration for specified time
@@ -903,7 +950,9 @@ def integrate(time, control_reference=None):
         r_vec_N_list = [item[-6:-3] for item in state[-3:]]
         v_vec_N_list = [item[-3:] for item in state[-3:]]
         
-        Lr, sigmaBR, wBR, b_w_RN, mode = evaluate_control_reference(t, state[x], w_gframe[x], G_list, num_cmgs, mission_mode[x], r_vec_N_list, v_vec_N_list, control_reference) 
+        L_h_dump = momentum_dump(ang_mom_b[x])
+
+        Lr, sigmaBR, wBR, b_w_RN, mode = evaluate_control_reference(t, state[x], w_gframe[x], G_list, num_cmgs, mission_mode[x], r_vec_N_list, v_vec_N_list, L_h_dump, control_reference) 
         OMEGA_dot_des = steering_law(t, state[x], Lr, I_list, w_gframe[x], G_list, b_w_RN, num_cmgs)
         
         # Test desired OMEGA dot and gamma dots
@@ -912,10 +961,10 @@ def integrate(time, control_reference=None):
         u = subservo(state[x], OMEGA_dot_des, w_gframe[x], I_list, num_cmgs)
         #u = 0.001*math.sin(0.05*t)*np.ones((2*num_cmgs,1))
         
-        k1 = ODE(state[x], u, I_list, num_cmgs, gimbal_frames)
-        k2 = ODE(state[x] + 0.5*time_step*k1, u, I_list, num_cmgs, gimbal_frames)
-        k3 = ODE(state[x] + 0.5*time_step*k2, u, I_list, num_cmgs, gimbal_frames)
-        k4 = ODE(state[x] + time_step*k3, u, I_list, num_cmgs, gimbal_frames)
+        k1 = ODE(state[x], u, I_list, num_cmgs, gimbal_frames, L_h_dump,)
+        k2 = ODE(state[x] + 0.5*time_step*k1, u, I_list, num_cmgs, gimbal_frames, L_h_dump,)
+        k3 = ODE(state[x] + 0.5*time_step*k2, u, I_list, num_cmgs, gimbal_frames, L_h_dump,)
+        k4 = ODE(state[x] + time_step*k3, u, I_list, num_cmgs, gimbal_frames, L_h_dump,)
         new_state = state[x] + (time_step*1/6)*(k1 + 2*k2 + 2*k3 + k4)
         new_state[0:3] = check_for_shadow_set(new_state[0:3])
 
@@ -930,6 +979,7 @@ def integrate(time, control_reference=None):
         rate_err.append(wBR)
         control.append(u)
         mission_mode.append(mode)
+        ang_mom_b.append(calc_ang_mom_b(new_state))
 
 
     # Remove last data point from each list so that there are the same number of elements as time
@@ -943,8 +993,9 @@ def integrate(time, control_reference=None):
     rate_err.pop()
     control.pop()
     mission_mode.pop()
+    ang_mom_b.pop()
    
-    return int_time, attitude, rates, OMEGA, w_gframe, control, att_err, rate_err, position, velocity, mission_mode
+    return int_time, attitude, rates, OMEGA, w_gframe, control, att_err, rate_err, position, velocity, mission_mode, ang_mom_b
 
 
 def plot_states(time, attitude, rates, OMEGA, position, mission_mode, title):
@@ -1598,7 +1649,7 @@ def make_animation(attitudes, errors):
 if __name__ == "__main__":
     # Run simulation
     t = 1000 # Simulation length in seconds
-    int_time, attitude, rates, OMEGA, w_gframe, control, att_err, rate_err, position, velocity, mission_mode  = integrate(t, control_reference='Full-Mission')
+    int_time, attitude, rates, OMEGA, w_gframe, control, att_err, rate_err, position, velocity, mission_mode, ang_mom_b  = integrate(t, control_reference='Full-Mission')
     #I_list = inertia_properties()
     #gimbal_frames = load_spacecraft_configuration()
     #Gs, Gt, Gg = g_frames_2_g_mats(gimbal_frames)
