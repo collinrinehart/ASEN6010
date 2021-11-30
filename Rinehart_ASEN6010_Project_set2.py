@@ -721,13 +721,16 @@ def subservo(state, des_OMEGA_dot, w_gframe, I_list, num_cmgs):
     #w_s = w_gframe[:,0]
     #w_t = w_gframe[:,1]
 
-    #OMEGA = state[14:]
+    OMEGA = state[6:6+num_cmgs]
     
-    rw_max_torque = .050 #Nm
+    rw_max_torque = .040 #Nm
+    speed_limits = 500
     u_s = (I_ws*des_OMEGA_dot)
     
     for i in range(num_cmgs):
-        if abs(u_s[i]) > rw_max_torque:
+        if abs(OMEGA[i]) > speed_limits and u_s[i] > 0:
+            u_s[i] = 0
+        elif abs(u_s[i]) > rw_max_torque:
             u_s[i] = math.copysign(rw_max_torque, u_s[i])
     #print(u_s)
 
@@ -909,11 +912,19 @@ def calc_ang_mom_b(state_vector):
     return ang_mom_b
 
 
-def momentum_dump(ang_mom_b):
-    V = 0.005   # momentum controller gain
+def momentum_dump(state_vector, num_cmgs):
+    V = 0.000005   # momentum controller gain
     threshold = 0.0
-    if mag(ang_mom_b) > threshold:
-        L_h_dump = -V * ang_mom_b
+    momentum_bias = np.array([[25],[25],[-25],[-25]])
+    OMEGA = state_vector[6:6+num_cmgs]
+    delta_OMEGA = OMEGA - momentum_bias
+
+    gimbal_frames = load_spacecraft_configuration()
+    Gs, Gt, Gg = g_frames_2_g_mats(gimbal_frames)
+
+
+    if mag(delta_OMEGA) > threshold:
+        L_h_dump = -V * Gs @ delta_OMEGA
     else:
         L_h_dump = np.array([[0], [0], [0]])
 
@@ -950,7 +961,7 @@ def integrate(time, control_reference=None):
         r_vec_N_list = [item[-6:-3] for item in state[-3:]]
         v_vec_N_list = [item[-3:] for item in state[-3:]]
         
-        L_h_dump = momentum_dump(ang_mom_b[x])
+        L_h_dump = momentum_dump(state[x], num_cmgs)
 
         Lr, sigmaBR, wBR, b_w_RN, mode = evaluate_control_reference(t, state[x], w_gframe[x], G_list, num_cmgs, mission_mode[x], r_vec_N_list, v_vec_N_list, L_h_dump, control_reference) 
         OMEGA_dot_des = steering_law(t, state[x], Lr, I_list, w_gframe[x], G_list, b_w_RN, num_cmgs)
