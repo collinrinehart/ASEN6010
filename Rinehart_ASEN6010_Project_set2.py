@@ -191,6 +191,8 @@ def attitude_error(t, sigma_BN, b_w_BN, r_vec_N, v_vec_N, RN_funct, wRN_funct):
         b_w_RN_dot = np.zeros((3,1))
     else:
         b_w_RN_dot = (wRN_funct(t, r_vec_N, v_vec_N)-wRN_funct(t-dt, r_vec_N, v_vec_N))/(dt)
+
+    #print(b)
     
     return sigma_BR, b_wBR, b_w_RN, b_w_RN_dot
 
@@ -198,11 +200,6 @@ def attitude_error(t, sigma_BN, b_w_BN, r_vec_N, v_vec_N, RN_funct, wRN_funct):
 def spotlight_reference(t, r_vec_N, v_vec_N):
     body_pointing_vec = np.array([[0],[0],[1]]) # point S/C +Z at target ground station ('no' error)
     body_clocking_vec = np.array([[0],[1],[0]]) # point S/C +Y at the inertial clocking vector (point error accumulates here)
-    body_3rd_vec = np.cross(body_pointing_vec, body_clocking_vec, axisa=0, axisb=0, axisc=0)
-    body_1st_vec = body_pointing_vec
-    body_2nd_vec = np.cross(body_3rd_vec, body_1st_vec, axisa=0, axisb=0, axisc=0)
-
-    RM = np.concatenate((body_1st_vec, body_2nd_vec, body_3rd_vec), axis = 1)   #M is the 'intermediate' reference frame
 
     r_groundsite_N, v_groundsite_N = groundsite(t)
     delta_r = r_groundsite_N - r_vec_N      # Vector pointing from S/C to groundsite in inertial frame
@@ -211,25 +208,14 @@ def spotlight_reference(t, r_vec_N, v_vec_N):
 
     inertial_pointing_vec = delta_r_unit    # inertial pointing direction ('no' error)
     inertial_clocking_vec = v_vec_N/mag(v_vec_N)    # inertial clocking target (velocity direciton) (error accumulates here)
-    M_3rd_vec = np.cross(inertial_pointing_vec, inertial_clocking_vec, axisa=0, axisb=0, axisc=0)
-    M_1st_vec = inertial_pointing_vec
-    M_2nd_vec = np.cross(M_3rd_vec, M_1st_vec, axisa=0, axisb=0, axisc=0)
-    
-    NM = np.concatenate((M_1st_vec, M_2nd_vec, M_3rd_vec), axis = 1)   #M is the 'intermediate' reference frame
-    RN = RM @ NM.T # full defines the pointing reference frame
-   # RN = NM
-    #print(NM @ body_pointing_vec)
+ 
+    RN = generate_frame(body_pointing_vec, body_clocking_vec, inertial_pointing_vec, inertial_clocking_vec)
     return RN
 
 
 def obj_track_reference(t, r_vec_N, v_vec_N):
     body_pointing_vec = np.array([[0],[0],[1]]) # point S/C +Z at target ground station ('no' error)
     body_clocking_vec = np.array([[0],[1],[0]]) # point S/C +Y at the inertial clocking vector (point error accumulates here)
-    body_3rd_vec = np.cross(body_pointing_vec, body_clocking_vec, axisa=0, axisb=0, axisc=0)
-    body_1st_vec = body_pointing_vec
-    body_2nd_vec = np.cross(body_3rd_vec, body_1st_vec, axisa=0, axisb=0, axisc=0)
-
-    RM = np.concatenate((body_1st_vec, body_2nd_vec, body_3rd_vec), axis = 1)   #M is the 'intermediate' reference frame
 
     r_obj_N, v_obj_N = object_states(t)
     delta_r = r_obj_N - r_vec_N      # Vector pointing from S/C to groundsite in inertial frame
@@ -238,12 +224,7 @@ def obj_track_reference(t, r_vec_N, v_vec_N):
     inertial_pointing_vec = delta_r_unit    # inertial pointing direction ('no' error)
     inertial_clocking_vec = v_vec_N/mag(v_vec_N)    # inertial clocking target (velocity direciton) (error accumulates here)
     
-    M_3rd_vec = np.cross(inertial_pointing_vec, inertial_clocking_vec, axisa=0, axisb=0, axisc=0)
-    M_1st_vec = inertial_pointing_vec
-    M_2nd_vec = np.cross(M_3rd_vec, M_1st_vec, axisa=0, axisb=0, axisc=0)
-
-    NM = np.concatenate((M_1st_vec, M_2nd_vec, M_3rd_vec), axis = 1)   #M is the 'intermediate' reference frame
-    RN = RM @ NM.T # full defines the pointing reference frame
+    RN = generate_frame(body_pointing_vec, body_clocking_vec, inertial_pointing_vec, inertial_clocking_vec)
     return RN
 
 
@@ -333,10 +314,20 @@ def Rs_N(t, r_vec_N = None, v_vec_N = None):
     # Defined as the body [0.707, 0.707, 0] body vector pointed at sun
     # +Z body vector aligned with inertial +Z
     angle = math.radians(45)
-    RsN = np.array([[ math.cos(angle), math.sin(angle), 0], 
+    RsN1 = np.array([[ math.cos(angle), math.sin(angle), 0], 
                     [-math.sin(angle), math.cos(angle), 0], 
                     [               0,               0, 1]])
-    return RsN
+    body_point = np.array([[0.707],[0.707],[0]])
+    body_clock = np.array([[0],[0],[1]])
+    inertial_point = np.array([[0],[1],[0]])
+    inertial_clock = np.array([[0],[0],[1]])
+    
+
+    RsN2 = generate_frame(body_point, body_clock, inertial_point, inertial_clock)
+    #print(RsN1)
+    #print(RsN2)
+    #print(pause)
+    return RsN2
 
 
 def RsN_rate(t, r_vec_N = None,  v_vec_N = None):
@@ -367,14 +358,24 @@ def Rn_N(t, r_vec_N = None, v_vec_N = None):
     # Defined as the body [0, 0, -1] body vector pointed nadir
     # body [0, 1, 0] pointed in velocity direction
 
-    HN = H_N(r_vec_N, v_vec_N)
+    # HN = H_N(r_vec_N, v_vec_N)
 
-    angle = math.radians(90)
-    Rot = np.array([[math.cos(angle), 0, -math.sin(angle)], 
-                    [              0, 1,                0],
-                    [math.sin(angle), 0,  math.cos(angle)]])
+    # angle = math.radians(90)
+    # Rot = np.array([[math.cos(angle), 0, -math.sin(angle)], 
+    #                 [              0, 1,                0],
+    #                 [math.sin(angle), 0,  math.cos(angle)]])
     
-    RnN = Rot @ HN
+    # RnN = Rot @ HN
+    nadir_point = -r_vec_N/mag(r_vec_N)
+    vel_point = v_vec_N/mag(v_vec_N)
+
+    body_point = np.array([[0],[0],[-1]])
+    body_clock = np.array([[0],[1],[0]])
+    inertial_point = nadir_point
+    inertial_clock = vel_point
+
+    RnN = generate_frame(body_point, body_clock, inertial_point, inertial_clock)
+
     return RnN
 
 
@@ -383,9 +384,26 @@ def RnN_rate(t, r_vec_N = None, v_vec_N = None):
     mu = 3.986004415E5  # Mu Earth [km^3/s^2]
     theta_dot = math.sqrt(mu/(mag(r_vec_N)**3))  # [rad/s] 
     w_Rn_H = np.array([[0], [0], [theta_dot]])
-    HN = H_N(r_vec_N, v_vec_N)
-    w_Rn_N = HN.T @ w_Rn_H
+    h_vec_N = np.cross(r_vec_N, v_vec_N, axisa=0, axisb=0, axisc=0)
+    h_vec_N_unit = h_vec_N/mag(h_vec_N)
+    w_Rn_N = theta_dot * h_vec_N_unit
     return w_Rn_N
+
+
+def generate_frame(body_pointing_vec, body_clocking_vec, inertial_pointing_vec, inertial_clocking_vec):
+    body_1st_vec = body_pointing_vec
+    body_3rd_vec = np.cross(body_pointing_vec, body_clocking_vec, axisa=0, axisb=0, axisc=0)
+    body_2nd_vec = np.cross(body_3rd_vec, body_1st_vec, axisa=0, axisb=0, axisc=0)
+
+    RM = np.concatenate((body_1st_vec, body_2nd_vec, body_3rd_vec), axis = 1)   #M is the 'intermediate' reference frame
+
+    M_1st_vec = inertial_pointing_vec
+    M_3rd_vec = np.cross(inertial_pointing_vec, inertial_clocking_vec, axisa=0, axisb=0, axisc=0)
+    M_2nd_vec = np.cross(M_3rd_vec, M_1st_vec, axisa=0, axisb=0, axisc=0)
+    
+    NM = np.concatenate((M_1st_vec, M_2nd_vec, M_3rd_vec), axis = 1)   #M is the 'intermediate' reference frame
+    RN = RM @ NM.T # full defines the pointing reference frame
+    return RN.T
 
 
 def generate_reference(t):
@@ -439,6 +457,77 @@ def object_states(time):
     return r_inertialframe_obj, v_inertialframe_obj
 
 
+def generate_mag_data(time, state, r_vec_N):
+    lat, long = rv_to_latlong(time, r_vec_N)
+    
+    r = mag(r_vec_N)
+    sigmaBN = state[0:3]
+    BN = MRP2DCM(sigmaBN)
+
+    matrix = np.array([[-math.cos(long), math.sin(long)*math.cos(lat), math.sin(long)*math.sin(lat)],
+                        [0, math.sin(lat), -math.cos(lat)],
+                        [-2*math.sin(long), -2*math.cos(long)*math.cos(lat), -2*math.cos(long)*math.sin(lat)]])
+
+    mag_vec = np.array([[29900],[1900],[-5530]]) # nT
+    B_NED = -(6378/r)**3 * matrix @ mag_vec
+
+    rot_lat = np.array([[math.cos(math.radians(90) + lat), 0, -math.sin(math.radians(90) + lat)],
+                          [0, 1, 0],
+                          [math.sin(math.radians(90) + lat),0 , math.cos(math.radians(90) + lat)]])
+
+    rot_long = np.array([[math.cos(-long), math.sin(long), 0],
+                          [-math.sin(long), math.cos(long), 0],
+                          [0,                    0,                         1]])   
+
+    B_ECEF = rot_long @ rot_lat @ B_NED   
+    B_ECI = ECEF_to_ECI(time, B_ECEF)   
+    B_body = BN @ B_ECI        
+    return B_body
+
+
+def ECI_to_ECEF(time, vec_N):
+    earth_lambda_0 = 0 # [rads]
+    earth_rot_rate = 7.292115E-5    #[rad/s]
+    earth_lambda = earth_lambda_0 + earth_rot_rate * time
+
+    ECI2ECEF = np.array([[math.cos(earth_lambda), math.sin(earth_lambda), 0],
+                          [-math.sin(earth_lambda), math.cos(earth_lambda), 0],
+                          [0,                    0,                         1]])
+    return ECI2ECEF @ vec_N
+
+
+def ECEF_to_ECI(time , vec_ECEF):
+    earth_lambda_0 = 0 # [rads]
+    earth_rot_rate = 7.292115E-5    #[rad/s]
+    earth_lambda = earth_lambda_0 + earth_rot_rate * time
+
+    ECEF2ECI = np.array([[math.cos(earth_lambda), -math.sin(earth_lambda), 0],
+                          [math.sin(earth_lambda), math.cos(earth_lambda), 0],
+                          [0,                    0,                         1]])
+    return ECEF2ECI @ vec_ECEF
+
+
+def rv_to_latlong(time, r_vec_N):
+    # Assumes spherical earth    
+    r_ECEF = ECI_to_ECEF(time, r_vec_N)
+    i = r_ECEF[0]
+    j = r_ECEF[1]
+    k = r_ECEF[2]
+
+    r_eq = math.sqrt(i**2 + j**2)
+    if r_eq < 1:
+        lat = math.radians(90)
+    else:
+        lat = math.atan(k/r_eq)
+
+    if j > 0:
+        long = math.acos(i/mag(r_vec_N))
+    else: 
+        long = -math.acos(i/mag(r_vec_N))
+
+    return lat, long
+
+
 def groundsite(time):
     #boulder_site_lat = 40.009808 * math.pi/180      #[rads]
     #boulder_site_long = -105.244104 * math.pi/180   #[rads]
@@ -460,16 +549,19 @@ def groundsite(time):
     r_vec_gs_ECF = rot_lat @ rot_long @ r_vec_gs
     v_unit_gs_ECF = rot_lat @ rot_long @ v_unit_gs
 
-    earth_lambda_0 = 0 # [rads]
+    # earth_lambda_0 = 0 # [rads]
     earth_rot_rate = 7.292115E-5    #[rad/s]
-    earth_lambda = earth_lambda_0 + earth_rot_rate * time
+    # earth_lambda = earth_lambda_0 + earth_rot_rate * time
 
-    rot_lambda = np.array([[math.cos(earth_lambda), math.sin(earth_lambda), 0],
-                          [-math.sin(earth_lambda), math.cos(earth_lambda), 0],
-                          [0,                    0,                         1]])
+    # rot_lambda = np.array([[math.cos(earth_lambda), math.sin(earth_lambda), 0],
+    #                       [-math.sin(earth_lambda), math.cos(earth_lambda), 0],
+    #                       [0,                    0,                         1]])
 
-    r_groundsite_N = rot_lambda @ r_vec_gs_ECF
-    v_groundsite_N = r_earth*math.cos(boulder_site_lat)*(rot_lambda @ v_unit_gs_ECF)
+
+    #r_groundsite_N = rot_lambda @ r_vec_gs_ECF
+    #v_groundsite_N = r_earth*math.cos(boulder_site_lat)*(rot_lambda @ v_unit_gs_ECF)
+    r_groundsite_N = ECEF_to_ECI(time, r_vec_gs_ECF)
+    v_groundsite_N = r_earth*math.cos(boulder_site_lat)*earth_rot_rate*ECEF_to_ECI(time, v_unit_gs_ECF)
     
     return r_groundsite_N, v_groundsite_N
 
@@ -497,7 +589,7 @@ def evaluate_control_reference(time, state, w_gframe, G_list, num_cmgs, mode, r_
     # Calculate gryoscopic feed forward terms for later use
     gyro_terms = np.array([[0, 0, 0]])
     for cmg in range(num_cmgs):
-        gyro_terms = gyro_terms +  (Iws*OMEGA[cmg]*w_g[cmg]*G_list[1][:,cmg] + Iws*OMEGA[cmg]*w_t[cmg]*G_list[2][:,cmg]).T
+        gyro_terms = gyro_terms +  ((Iws*OMEGA[cmg]*w_g[cmg]*G_list[1][:,cmg] - Iws*OMEGA[cmg]*w_t[cmg]*G_list[2][:,cmg]).T)
     
     # Evaluate which control reference to use at the current time step
     if control_reference == 'Full-Mission':
@@ -507,7 +599,7 @@ def evaluate_control_reference(time, state, w_gframe, G_list, num_cmgs, mode, r_
         angle_to_gs = math.degrees(math.acos(np.dot(r_vec_N.T, r_groundsite_N)/(mag(r_vec_N)*mag(r_groundsite_N))))
         
         if mode == 'Initialization' or  mode == 'De-tumble':
-            mission_mode = 'De-tumble'
+            mission_mode = 'De-Tumble'
             control_reference = mission_mode
             if mag(b_wBN) < 0.001:
                 #print(mag(b_wBN))
@@ -537,6 +629,7 @@ def evaluate_control_reference(time, state, w_gframe, G_list, num_cmgs, mode, r_
         b_w_RN_dot = np.zeros((3,1))
         gyro_terms = np.zeros((3,1))
         mission_mode = "Idle"
+        L_h_dump = np.zeros((3,1))
 
     elif control_reference == 'Regulation':
         sigmaBR = sigmaBN
@@ -561,7 +654,7 @@ def evaluate_control_reference(time, state, w_gframe, G_list, num_cmgs, mode, r_
         sigmaBR, b_wBR, b_w_RN, b_w_RN_dot = attitude_error(time, sigmaBN, b_wBN, r_vec_N, v_vec_N, Rn_N, RnN_rate)
         mission_mode = control_reference
 
-    elif control_reference == 'De-tumble':
+    elif control_reference == 'De-Tumble':
         sigmaBR = np.zeros((3,1))
         b_wBR = b_wBN
         b_w_RN = np.zeros((3,1))
@@ -583,8 +676,12 @@ def evaluate_control_reference(time, state, w_gframe, G_list, num_cmgs, mode, r_
     #sigmaBR, b_wBR = attitude_error(time, sigmaBN, b_wBN, RN, N_w_RN)
     #b_w_RN = BN @ N_w_RN
     # b_w_RN_dot = BN @ N_w_RN_dot
-    
-    Lr = -K * sigmaBR - P * b_wBR + I @ (b_w_RN_dot - tilde(b_wBN) @ b_w_RN) + tilde(b_w_RN) @ I @ b_wBN - ext_torque + gyro_terms.reshape(3,1)
+    ext_torque = ext_torque_drag + L_h_dump
+
+    if mission_mode == "Idle":
+        Lr = np.zeros((3,1))
+    else:
+        Lr = -K * sigmaBR - P * b_wBR + I @ (b_w_RN_dot - tilde(b_wBN) @ b_w_RN) + tilde(b_wBN) @ I @ b_wBN - ext_torque + gyro_terms.reshape(3,1)
     
     return Lr, sigmaBR, b_wBR, b_w_RN, mission_mode
 
@@ -596,8 +693,8 @@ def inertia_properties():
     G_0 = load_spacecraft_configuration()
 
     I_s = np.array([[10, 0, 0],
-                    [0, 5, 0],
-                    [0, 0, 7.5]])   # [kg*m^2]
+                    [0, 7.5, 0],
+                    [0, 0, 5]])   # [kg*m^2]
 
     # Gimbal inertia in Gimbal frame
     I_G = np.array([[.0, 0, 0],
@@ -605,9 +702,9 @@ def inertia_properties():
                     [0, 0, .0]])    # [kg*m^2]
 
     # wheel inertia in wheel frame, note due to symmetry w_I_W = g_I_W
-    I_W = np.array([[.0005, 0, 0],
-                    [0, .0002, 0],
-                    [0, 0, .0002]]) # [kg*m^2]
+    I_W = np.array([[.0015, 0, 0],
+                    [0, .0005, 0],
+                    [0, 0, .0005]]) # [kg*m^2]
 
     # combined wheel and gimbal inertia, expressed in gimbal frame
     J = I_G + I_W
@@ -689,7 +786,9 @@ def load_initial_conditions():
     #position_0 = [np.array([[-1303.301557], [-3287.245782], [5998.429856]])] #initial position vector (ECI)
     #velocity_0 = [np.array([[0.449126925], [6.578003736], [3.699223314]])] #initial position vector (ECI)
     position_0 = [np.array([[0], [0], [6962]])] #initial position vector (ECI)
-    velocity_0 = [np.array([[0], [7.56], [0]])] #initial position vector (ECI)
+    mu = 3.986004415E5  # Mu Earth [km^3/s^2]
+    vel = math.sqrt(mu/(mag(position_0)))  # [km/s]
+    velocity_0 = [np.array([[0], [vel], [0]])] #initial position vector (ECI)
 
     # Spacecraft Body Initial Conditions
     mrp0 = [np.array([[.4],[0.3],[-0.3]])] #initial attitude as a MRP
@@ -739,46 +838,23 @@ def subservo(state, des_OMEGA_dot, w_gframe, I_list, num_cmgs):
 
 
 def steering_law(t, state, Lr, I_list, w_gframe, G_list, b_w_RN, num_cmgs):
-    Iws = I_list[3][0,0] 
-    Js = I_list[4][0,0]
-    Jt = I_list[4][1,1]
-    Jg = I_list[4][2,2]
-
     OMEGA = state[6:6+num_cmgs]
-    w_s = w_gframe[:,0]
-    w_t = w_gframe[:,1]
-
     Gs = G_list[0]
-    Gt = G_list[1]
 
-    D0 = np.zeros((3, num_cmgs))
-    D1 = np.zeros((3, num_cmgs))
-    D2 = np.zeros((3, num_cmgs))
-    D3 = np.zeros((3, num_cmgs))
-    D4 = np.zeros((3, num_cmgs))
+    u_s = Gs.T @ np.linalg.inv(Gs@Gs.T) @ -Lr
 
-    for cmg in range(num_cmgs):
-        D0[:, cmg] = Iws*Gs[:,cmg]
-        D1[:, cmg] = (Iws*OMEGA[cmg] + 0.5*Js*w_s[cmg])*Gt[:,cmg] + 0.5*Js*w_t[cmg]*Gs[:,cmg]
-        D2[:, cmg] = 0.5*Jt*(w_t[cmg]*Gs[:,cmg] + w_s[cmg]*Gt[:,cmg])
-        D3[:, cmg] = Jg*(w_t[cmg]*Gs[:,cmg] - w_s[cmg]*Gt[:,cmg])
-        D4[:, cmg] = list(0.5*(Js-Jt)*(Gs[:,cmg].reshape((3,1)) @ Gt[:,cmg].reshape((1,3)) @ b_w_RN + Gt[:,cmg].reshape((3,1)) @ Gs[:,cmg].reshape((1,3)) @ b_w_RN))
-
-    D = D1 - D2 + D3 + D4
-    Q = np.block([D0, D])
-
-    # Control portion of steering law implementation
-    W_s = 1
-    W_g = 0
-    W_s_matrix = W_s * np.identity(num_cmgs)
-    W_g_matrix = W_g * np.identity(num_cmgs)
-    W = np.block([[W_s_matrix, np.zeros((num_cmgs, num_cmgs))],
-                [np.zeros((num_cmgs, num_cmgs)), W_g_matrix]]) 
-
-    eta_dot_control = W @ Q.T @ np.linalg.inv(Q @ W @ Q.T) @ (-Lr)
+    rw_max_torque = .040 #Nm
+    speed_limits = 700 #[rad/s]
     
-    OMEGA_dot_des = eta_dot_control[0:num_cmgs]
-    return OMEGA_dot_des
+    for i in range(num_cmgs):
+        if OMEGA[i] > speed_limits and u_s[i] > 0:
+            u_s[i] = 0
+        elif OMEGA[i] < -speed_limits and u_s[i] < 0:
+            u_s[i] = 0
+        elif abs(u_s[i]) > rw_max_torque:
+            u_s[i] = math.copysign(rw_max_torque, u_s[i])
+
+    return u_s 
 
 
 def ODE(state_vector, control_vector, inertia_list, num_cmgs, G_0, L_h_dump,):
@@ -912,23 +988,48 @@ def calc_ang_mom_b(state_vector):
     return ang_mom_b
 
 
-def momentum_dump(state_vector, num_cmgs):
-    V = 0.000005   # momentum controller gain
+def momentum_dump(time, state_vector, num_cmgs):
+    V = 0.005   # momentum controller gain
     threshold = 0.0
     momentum_bias = np.array([[25],[25],[-25],[-25]])
     OMEGA = state_vector[6:6+num_cmgs]
     delta_OMEGA = OMEGA - momentum_bias
+    I_list = inertia_properties()
+    Iws = I_list[3][0,0]
 
     gimbal_frames = load_spacecraft_configuration()
     Gs, Gt, Gg = g_frames_2_g_mats(gimbal_frames)
 
+    r_vec_N = r_vec_N = state_vector[6+num_cmgs:6+num_cmgs+3]
+    B_body = generate_mag_data(time, state_vector, r_vec_N)
+    
+    if mag(delta_OMEGA) > threshold and mag(Gs @ (Iws * delta_OMEGA)) > 0:
+        L_h_dump_des = -V * Gs @ (Iws * delta_OMEGA)
+        B_body_unit = B_body/mag(B_body)
+        L_dump_unit = L_h_dump_des/mag(L_h_dump_des)
+        
+        
+        base_1 = np.cross(B_body_unit, L_dump_unit, axisa=0, axisb=0, axisc=0)
+        base_2 = np.cross(B_body_unit, base_1, axisa=0, axisb=0, axisc=0)
+        base_3 = B_body_unit
+        BF = np.concatenate((base_1, base_2, base_3), axis = 1) # intermediate frame F
+        
 
-    if mag(delta_OMEGA) > threshold:
-        L_h_dump = -V * Gs @ delta_OMEGA
+        L_dump_Fx = float(np.dot(L_h_dump_des.T, base_1))
+        L_dump_Fy = float(np.dot(L_h_dump_des.T, base_2))
+        L_dump_allowable = np.array([[L_dump_Fx],[L_dump_Fy],[0]])
+        
+        L_dump_allowable_b = BF @ L_dump_allowable
+        L_h_dump = L_dump_allowable_b
+        dipole = np.cross(B_body_unit, L_h_dump, axisa=0, axisb=0, axisc=0)
+        print(L_dump_allowable_b)
     else:
         L_h_dump = np.array([[0], [0], [0]])
+        dipole = np.array([[0], [0], [0]])
 
-    return L_h_dump
+    #L_h_dump = np.array([[0], [0], [0]])
+    
+    return L_h_dump, dipole, B_body
 
 
 def integrate(time, control_reference=None):
@@ -948,6 +1049,8 @@ def integrate(time, control_reference=None):
     w_gframe = []
     ang_mom_b = [calc_ang_mom_b(state[0])]
     mission_mode = ['Initialization']
+    dipole_list = []
+    B_body_list = []
     
     # Perform Runge-Kutta 4th Order Integration for specified time
     for t in int_time:
@@ -961,15 +1064,16 @@ def integrate(time, control_reference=None):
         r_vec_N_list = [item[-6:-3] for item in state[-3:]]
         v_vec_N_list = [item[-3:] for item in state[-3:]]
         
-        L_h_dump = momentum_dump(state[x], num_cmgs)
-
-        Lr, sigmaBR, wBR, b_w_RN, mode = evaluate_control_reference(t, state[x], w_gframe[x], G_list, num_cmgs, mission_mode[x], r_vec_N_list, v_vec_N_list, L_h_dump, control_reference) 
-        OMEGA_dot_des = steering_law(t, state[x], Lr, I_list, w_gframe[x], G_list, b_w_RN, num_cmgs)
+        L_h_dump, dipole, B_body = momentum_dump(t, state[x], num_cmgs)
         
+        Lr, sigmaBR, wBR, b_w_RN, mode = evaluate_control_reference(t, state[x], w_gframe[x], G_list, num_cmgs, mission_mode[x], r_vec_N_list, v_vec_N_list, L_h_dump, control_reference) 
+        
+        #OMEGA_dot_des = steering_law(t, state[x], Lr, I_list, w_gframe[x], G_list, b_w_RN, num_cmgs)
+        u = steering_law(t, state[x], Lr, I_list, w_gframe[x], G_list, b_w_RN, num_cmgs)
         # Test desired OMEGA dot and gamma dots
         #OMEGA_dot_des = -0.01*math.cos(0.05*t)*np.ones((num_cmgs,1))
         
-        u = subservo(state[x], OMEGA_dot_des, w_gframe[x], I_list, num_cmgs)
+        #u = subservo(state[x], OMEGA_dot_des, w_gframe[x], I_list, num_cmgs)
         #u = 0.001*math.sin(0.05*t)*np.ones((2*num_cmgs,1))
         
         k1 = ODE(state[x], u, I_list, num_cmgs, gimbal_frames, L_h_dump,)
@@ -991,6 +1095,9 @@ def integrate(time, control_reference=None):
         control.append(u)
         mission_mode.append(mode)
         ang_mom_b.append(calc_ang_mom_b(new_state))
+        dipole_list.append(dipole)
+        B_body_list.append(B_body)
+
 
 
     # Remove last data point from each list so that there are the same number of elements as time
@@ -1006,7 +1113,7 @@ def integrate(time, control_reference=None):
     mission_mode.pop()
     ang_mom_b.pop()
    
-    return int_time, attitude, rates, OMEGA, w_gframe, control, att_err, rate_err, position, velocity, mission_mode, ang_mom_b
+    return int_time, attitude, rates, OMEGA, w_gframe, control, att_err, rate_err, position, velocity, mission_mode, ang_mom_b, dipole_list, B_body_list
 
 
 def plot_states(time, attitude, rates, OMEGA, position, mission_mode, title):
@@ -1111,7 +1218,7 @@ def plot_errors(time, att_err, rate_err,title):
     plt.grid(True)
 
 
-def plot_control(time, control, title):
+def plot_control(time, control, dipole, title):
     t = time
     plt.figure()
     plt.plot(t, [item[0] for item in control])
@@ -1123,6 +1230,28 @@ def plot_control(time, control, title):
     plt.ylabel('Control Torque [N-m]')
     plt.legend(['u_s1', 'u_s2', 'u_s3', 'u_s4'])
     plt.grid(True)
+
+
+    plt.figure()
+    plt.plot(t, [item[0] for item in dipole])
+    plt.plot(t, [item[1] for item in dipole])
+    plt.plot(t, [item[2] for item in dipole])
+    plt.title(title + ": Torque Rod Dipole vs. Time")
+    plt.xlabel('Time from Epoch [sec]')
+    plt.ylabel('Dipole [Am^2]')
+    plt.legend(['mu_x', 'mu_y', 'mu_z'])
+    plt.grid(True)
+
+    plt.figure()
+    plt.plot(t, [item[0] for item in B_body])
+    plt.plot(t, [item[1] for item in B_body])
+    plt.plot(t, [item[2] for item in B_body])
+    plt.title(title + ": Body Mag Field vs. Time")
+    plt.xlabel('Time from Epoch [sec]')
+    plt.ylabel('Mag Field [nT]')
+    plt.legend(['B_x', 'B_y', 'B_z'])
+    plt.grid(True)
+
 
     # plt.figure()
     # plt.plot(t, [item[4] for item in data[10]])
@@ -1659,15 +1788,15 @@ def make_animation(attitudes, errors):
 
 if __name__ == "__main__":
     # Run simulation
-    t = 1000 # Simulation length in seconds
-    int_time, attitude, rates, OMEGA, w_gframe, control, att_err, rate_err, position, velocity, mission_mode, ang_mom_b  = integrate(t, control_reference='Full-Mission')
+    t = 6000 # Simulation length in seconds
+    int_time, attitude, rates, OMEGA, w_gframe, control, att_err, rate_err, position, velocity, mission_mode, ang_mom_b, dipole, B_body  = integrate(t, control_reference='Full-Mission')
     #I_list = inertia_properties()
     #gimbal_frames = load_spacecraft_configuration()
     #Gs, Gt, Gg = g_frames_2_g_mats(gimbal_frames)
     #G_list = [Gs, Gt, Gg]
 
     plot_states(int_time, attitude, rates, OMEGA, position, mission_mode, 'Project')
-    plot_control(int_time, control, 'Project')
+    plot_control(int_time, control, dipole, 'Project')
     plot_conservation(int_time, attitude, rates, OMEGA, control, 'Project')
     plot_errors(int_time, att_err, rate_err, 'Project')
     #plot_checks([int_time, attitude, rates, OMEGA, G_list, w_gframe, control, att_err, rate_err], 'Project')
