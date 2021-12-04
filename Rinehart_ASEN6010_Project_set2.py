@@ -781,35 +781,6 @@ def load_spacecraft_configuration():
     return BG_0, BG_1, BG_2, BG_3
 
 
-def load_initial_conditions():
-    # Spacecraft initial r and v vectors
-    #position_0 = [np.array([[-1303.301557], [-3287.245782], [5998.429856]])] #initial position vector (ECI)
-    #velocity_0 = [np.array([[0.449126925], [6.578003736], [3.699223314]])] #initial position vector (ECI)
-    position_0 = [np.array([[0], [0], [6962]])] #initial position vector (ECI)
-    mu = 3.986004415E5  # Mu Earth [km^3/s^2]
-    vel = math.sqrt(mu/(mag(position_0)))  # [km/s]
-    velocity_0 = [np.array([[0], [vel], [0]])] #initial position vector (ECI)
-
-    # Spacecraft Body Initial Conditions
-    mrp0 = [np.array([[.4],[0.3],[-0.3]])] #initial attitude as a MRP
-    b_w_BN_0 = [(math.pi / 180) * np.array([[0.5], [0.05], [0.5]])]  # Initial angular velocity in deg/s, expressed in body frame and converted to rad/s
-
-    #mrp0 = [np.array([[0],[0],[0]])] #initial attitude as a MRP
-    #b_w_BN_0 = [(math.pi / 180) * np.array([[0], [0.0], [0.5]])]  # Initial angular velocity in deg/s, expressed in body frame and converted to rad/s
-
-    # Gimbal Initial conditions and Load initial spacecraft configuration (gimbal angles = 0)
-    gimbal_frames_0 = load_spacecraft_configuration()
-    num_cmgs = len(gimbal_frames_0)                       # determines the number of CMGs used from the spacecraft configuration. 
-                                                                # Used to build initial condition matrices generally
-
-    # Wheel initial Conditions
-    OMEGA_0 = [np.zeros((num_cmgs, 1))]
-    #OMEGA_0 = [np.array([[10],[10],[-10],[-10]])]
-    OMEGA_0 = [np.array([[50],[50],[-50],[-50]])]
-
-    return mrp0, b_w_BN_0, OMEGA_0, gimbal_frames_0, num_cmgs, position_0, velocity_0
-
-
 def subservo(state, des_OMEGA_dot, w_gframe, I_list, num_cmgs):
     #K_gam = 0.5  # gimbal gain [1/sec]
 
@@ -1022,7 +993,7 @@ def momentum_dump(time, state_vector, num_cmgs):
         L_dump_allowable_b = BF @ L_dump_allowable
         L_h_dump = L_dump_allowable_b
         dipole = np.cross(B_body_unit, L_h_dump, axisa=0, axisb=0, axisc=0)
-        print(L_dump_allowable_b)
+        #print(L_dump_allowable_b)
     else:
         L_h_dump = np.array([[0], [0], [0]])
         dipole = np.array([[0], [0], [0]])
@@ -1030,6 +1001,36 @@ def momentum_dump(time, state_vector, num_cmgs):
     #L_h_dump = np.array([[0], [0], [0]])
     
     return L_h_dump, dipole, B_body
+
+
+
+def load_initial_conditions():
+    # Spacecraft initial r and v vectors
+    #position_0 = [np.array([[-1303.301557], [-3287.245782], [5998.429856]])] #initial position vector (ECI)
+    #velocity_0 = [np.array([[0.449126925], [6.578003736], [3.699223314]])] #initial position vector (ECI)
+    position_0 = [np.array([[0], [0], [6962]])] #initial position vector (ECI)
+    mu = 3.986004415E5  # Mu Earth [km^3/s^2]
+    vel = math.sqrt(mu/(mag(position_0)))  # [km/s]
+    velocity_0 = [np.array([[0], [vel], [0]])] #initial position vector (ECI)
+
+    # Spacecraft Body Initial Conditions
+    mrp0 = [np.array([[.4],[0.3],[-0.3]])] #initial attitude as a MRP
+    b_w_BN_0 = [(math.pi / 180) * np.array([[5], [0.05], [5]])]  # Initial angular velocity in deg/s, expressed in body frame and converted to rad/s
+
+    #mrp0 = [np.array([[0],[0],[0]])] #initial attitude as a MRP
+    #b_w_BN_0 = [(math.pi / 180) * np.array([[0], [0.0], [0.5]])]  # Initial angular velocity in deg/s, expressed in body frame and converted to rad/s
+
+    # Gimbal Initial conditions and Load initial spacecraft configuration (gimbal angles = 0)
+    gimbal_frames_0 = load_spacecraft_configuration()
+    num_cmgs = len(gimbal_frames_0)                       # determines the number of CMGs used from the spacecraft configuration. 
+                                                                # Used to build initial condition matrices generally
+
+    # Wheel initial Conditions
+    OMEGA_0 = [np.zeros((num_cmgs, 1))]
+    #OMEGA_0 = [np.array([[10],[10],[-10],[-10]])]
+    OMEGA_0 = [np.array([[50],[50],[-50],[-50]])]
+
+    return mrp0, b_w_BN_0, OMEGA_0, gimbal_frames_0, num_cmgs, position_0, velocity_0
 
 
 def integrate(time, control_reference=None):
@@ -1187,6 +1188,16 @@ def plot_states(time, attitude, rates, OMEGA, position, mission_mode, title):
     # # plt.zlabel('Z position [km]')
     ax.scatter3D(7000, 7000, 7000, c='gray')
     ax.scatter3D(-7000, -7000, -7000, c='gray')
+
+    plt.figure()
+    plt.plot(t, x)
+    plt.plot(t, y)
+    plt.plot(t, z)
+    plt.title(title + ': Position vs. Time')
+    plt.xlabel('Time from Epoch [sec]')
+    plt.ylabel('S/C Position ECI [km]')
+    plt.legend(['x', 'y', 'z'])
+    plt.grid(True)
 
     plt.figure()
     plt.plot(t, mission_mode)
@@ -1788,8 +1799,8 @@ def make_animation(attitudes, errors):
 
 if __name__ == "__main__":
     # Run simulation
-    t = 6000 # Simulation length in seconds
-    int_time, attitude, rates, OMEGA, w_gframe, control, att_err, rate_err, position, velocity, mission_mode, ang_mom_b, dipole, B_body  = integrate(t, control_reference='Full-Mission')
+    t = 5000 # Simulation length in seconds
+    int_time, attitude, rates, OMEGA, w_gframe, control, att_err, rate_err, position, velocity, mission_mode, ang_mom_b, dipole, B_body  = integrate(t, control_reference='De-Tumble')
     #I_list = inertia_properties()
     #gimbal_frames = load_spacecraft_configuration()
     #Gs, Gt, Gg = g_frames_2_g_mats(gimbal_frames)
