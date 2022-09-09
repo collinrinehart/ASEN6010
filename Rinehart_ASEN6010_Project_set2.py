@@ -1827,7 +1827,7 @@ if __name__ == "__main__":
         'show': True
                 }
 
-    #make_animation(attitudeDCMs, referenceDCMs)
+    make_animation(attitudeDCMs, referenceDCMs)
     plot_reference_frames([attitudeDCMs[-1], referenceDCMs[-1]], config)
     
     plt.show()
